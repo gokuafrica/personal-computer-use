@@ -1,4 +1,5 @@
 config.json
+electron/default-config.json
 trajectories/
 dist/
 *.log
