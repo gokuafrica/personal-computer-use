@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-MAX_STEPS = 25
+MAX_STEPS = 40
 
 # Full vocabulary for typed text: matches words typed INTO something (prompt
 # boxes, forms, documents) where the words themselves could trigger a

@@ -123,7 +123,7 @@ buy|transfer|send|submit|uninstall|shut down|restart|sign out|log out`
 (name only; a field's value is content and clicking it is benign — so Word's
 "Format" button in Find & Replace does not gate). The `win` key and
 `win+<key>` combos are allowed (reversible Start-menu/search/run navigation;
-gating them hung routine tasks). Hard cap: 25 steps per task.
+gating them hung routine tasks). Hard cap: 40 steps per task.
 
 ## Coordinate contract
 

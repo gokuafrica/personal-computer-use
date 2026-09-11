@@ -21,7 +21,7 @@ Global hotkey → instruction bar → "open Chrome and go to youtube"
 - **Status card**: bottom-right card shows the current step, last action, and a log.
   Safe actions run automatically; potentially destructive ones (typing/pressing
   anything matching delete/pay/send/etc., `Alt+F4`, `Ctrl+Alt+Del`, `Win`) pop an
-  Approve/Reject prompt. Tasks cap at 25 steps. Mouse into a screen corner aborts.
+  Approve/Reject prompt. Tasks cap at 40 steps. Mouse into a screen corner aborts.
 - **Stop button** kills the task instantly.
 
 ## Providers

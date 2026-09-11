@@ -27,7 +27,7 @@ const DEFAULT_CONFIG = {
   anthropic: { api_key: '', model: 'claude-3-7-sonnet-latest' },
   openai_compat: { base_url: '', api_key: '', model: '' },
   hotkey: 'Control+Alt+K',
-  max_steps: 25,
+  max_steps: 40,
   action_delay_s: 0.4,
   pointer_glide_s: 0.45,
   cursor_overlay: true

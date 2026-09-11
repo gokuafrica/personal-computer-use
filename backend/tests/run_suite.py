@@ -135,8 +135,8 @@ def cmd_validate(cases: list[TestCase]) -> int:
             errors.append(f"{prefix}: bad category {case.category!r}")
         if not case.instruction.strip():
             errors.append(f"{prefix}: empty instruction")
-        if case.max_steps <= 0 or case.max_steps > 25:
-            errors.append(f"{prefix}: max_steps {case.max_steps} outside 1..25")
+        if case.max_steps <= 0 or case.max_steps > 40:
+            errors.append(f"{prefix}: max_steps {case.max_steps} outside 1..40")
         if case.timeout_s <= 0:
             errors.append(f"{prefix}: timeout_s must be positive")
         if case.gates.get("policy") not in ("approve", "reject"):
