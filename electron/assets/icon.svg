@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Ghost pointer: rounded cursor arrow with eyes -->
+  <!-- White halo for legibility on light and dark taskbars -->
+  <path d="M30,10 L30,72 L43,59 L52,79 L63,74 L55,55 L71,55 Z"
+        fill="#ffffff" stroke="#ffffff" stroke-width="9"
+        stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- Blue body with rounded joins -->
+  <path d="M30,10 L30,72 L43,59 L52,79 L63,74 L55,55 L71,55 Z"
+        fill="#4C8BF0" stroke="#4C8BF0" stroke-width="4.5"
+        stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- Eyes -->
+  <circle cx="40" cy="37" r="4" fill="#ffffff"/>
+  <circle cx="51" cy="37" r="4" fill="#ffffff"/>
+</svg>

@@ -85,17 +85,13 @@ button.primary:hover { background: #3570e0; }
   border: 1px solid rgba(240, 198, 103, 0.4);
 }
 
-#confirm-reason {
-  font-size: 15px;
-  font-weight: 600;
-  color: #f0c667;
-}
-
 #confirm-detail {
   margin-top: 4px;
   font-size: 14px;
   color: #d8dbe3;
   word-break: break-word;
+  max-height: 140px;
+  overflow-y: auto;
 }
 
 #confirm-buttons {

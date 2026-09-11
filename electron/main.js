@@ -28,7 +28,9 @@ const DEFAULT_CONFIG = {
   openai_compat: { base_url: '', api_key: '', model: '' },
   hotkey: 'Control+Alt+K',
   max_steps: 25,
-  action_delay_s: 0.4
+  action_delay_s: 0.4,
+  pointer_glide_s: 0.45,
+  cursor_overlay: true
 };
 
 // ---------- config location ----------
@@ -100,6 +102,10 @@ let tray = null;
 let barWin = null;
 let statusWin = null;
 let settingsWin = null;
+let overlayWin = null;
+let overlayHideTimer = null;
+let overlayPollTimer = null;
+let overlayBoundsCache = null;
 let backendProc = null;
 let backendRestarted = false;
 let backendExitNotified = false;
@@ -234,6 +240,8 @@ function pipeBackend(proc) {
 
 function onBackendExit(code) {
   console.log('[backend] exited with code', code);
+  hideOverlay();
+  forceRestoreCursor();
   if (quitting) return;
   if (!backendRestarted) {
     backendRestarted = true;
@@ -263,6 +271,28 @@ function killBackend() {
     } catch {}
   }
   backendProc = null;
+}
+
+// Safety net: if the backend died without restoring the native cursors it hid
+// for the task, force-restore them via SPI_SETCURSORS. Cheap and idempotent.
+function forceRestoreCursor() {
+  if (process.platform !== 'win32') return;
+  const py = app.isPackaged
+    ? path.join(process.resourcesPath, 'python-runtime', 'python.exe')
+    : 'python';
+  const script = app.isPackaged
+    ? path.join(process.resourcesPath, 'backend', 'cursor_restore.py')
+    : path.join(ROOT, 'backend', 'cursor_restore.py');
+  try {
+    const proc = spawn(py, [script], { windowsHide: true, stdio: 'ignore' });
+    if (!app.isPackaged) {
+      proc.on('error', () => {
+        try {
+          spawn('py', [script], { windowsHide: true, stdio: 'ignore' });
+        } catch {}
+      });
+    }
+  } catch {}
 }
 
 // ---------- websocket client ----------
@@ -324,24 +354,51 @@ function broadcastConnection(connected) {
       win.webContents.send('backend-connection', { connected });
     }
   }
+  if (!connected) hideOverlay();
+}
+
+// Backend action coords are physical screen pixels; the overlay works in DIP.
+function convertActionPoint(msg) {
+  if (!Number.isFinite(msg.x) || !Number.isFinite(msg.y)) return;
+  let dip = { x: msg.x, y: msg.y };
+  try {
+    if (typeof screen.screenToDIPPoint === 'function') {
+      dip = screen.screenToDIPPoint({ x: msg.x, y: msg.y });
+    } else {
+      const scale = screen.getPrimaryDisplay().scaleFactor || 1;
+      dip = { x: msg.x / scale, y: msg.y / scale };
+    }
+  } catch {}
+  const bounds = overlayBoundsCache || overlayBounds();
+  msg.x = dip.x - bounds.x;
+  msg.y = dip.y - bounds.y;
 }
 
 function handleBackendMessage(msg) {
   if (!msg || typeof msg.type !== 'string') return;
+  if (msg.type === 'action') convertActionPoint(msg);
   if (statusWin && !statusWin.isDestroyed()) {
     statusWin.webContents.send('backend-message', msg);
+  }
+  if (overlayWin && !overlayWin.isDestroyed()) {
+    overlayWin.webContents.send('backend-message', msg);
   }
   switch (msg.type) {
     case 'need_confirmation':
       showStatusCard();
+      showOverlay();
       break;
     case 'status':
-      if (msg.state === 'running') {
+      if (msg.state === 'running' || msg.state === 'awaiting_confirmation') {
         showStatusCard();
+        showOverlay();
+      } else if (msg.state === 'idle' || msg.state === 'error') {
+        hideOverlay();
       }
       break;
     case 'task_done':
       scheduleStatusHide();
+      hideOverlay();
       break;
   }
 }
@@ -445,6 +502,95 @@ function toggleBar() {
   }
 }
 
+// ---------- agent cursor overlay ----------
+
+// Fullscreen transparent click-through overlay: fancy agent cursor, edge glow,
+// per-action effects. Visible only while a task runs; never takes input.
+function overlayBounds() {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const display of screen.getAllDisplays()) {
+    minX = Math.min(minX, display.bounds.x);
+    minY = Math.min(minY, display.bounds.y);
+    maxX = Math.max(maxX, display.bounds.x + display.bounds.width);
+    maxY = Math.max(maxY, display.bounds.y + display.bounds.height);
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+function createOverlayWindow() {
+  if (overlayWin && !overlayWin.isDestroyed()) return;
+  const bounds = overlayBounds();
+  overlayWin = new BrowserWindow({
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    show: false,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    focusable: false,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  overlayWin.setAlwaysOnTop(true, 'screen-saver');
+  overlayWin.setIgnoreMouseEvents(true);
+  overlayWin.loadFile(path.join(__dirname, 'renderer', 'agent-overlay.html'));
+  overlayWin.on('close', (e) => {
+    if (!quitting) e.preventDefault();
+  });
+}
+
+function startOverlayPoll() {
+  if (overlayPollTimer) return;
+  overlayPollTimer = setInterval(() => {
+    if (!overlayWin || overlayWin.isDestroyed() || !overlayWin.isVisible()) return;
+    const pt = screen.getCursorScreenPoint();
+    const bounds = overlayBoundsCache || overlayBounds();
+    overlayWin.webContents.send('overlay-cursor', { x: pt.x - bounds.x, y: pt.y - bounds.y });
+  }, 16);
+}
+
+function stopOverlayPoll() {
+  clearInterval(overlayPollTimer);
+  overlayPollTimer = null;
+}
+
+function showOverlay() {
+  if (config.cursor_overlay === false) return;
+  createOverlayWindow();
+  const bounds = overlayBounds();
+  const cached = overlayBoundsCache;
+  if (!cached || cached.x !== bounds.x || cached.y !== bounds.y ||
+      cached.width !== bounds.width || cached.height !== bounds.height) {
+    overlayBoundsCache = bounds;
+    overlayWin.setBounds(bounds);
+  }
+  if (!overlayWin.isVisible()) overlayWin.showInactive();
+  startOverlayPoll();
+}
+
+function hideOverlay() {
+  clearTimeout(overlayHideTimer);
+  stopOverlayPoll();
+  if (!overlayWin || overlayWin.isDestroyed() || !overlayWin.isVisible()) return;
+  // Give the renderer a moment to fade its content out first.
+  overlayHideTimer = setTimeout(() => {
+    if (overlayWin && !overlayWin.isDestroyed()) overlayWin.hide();
+  }, 450);
+}
+
 // ---------- settings ----------
 
 function createSettingsWindow() {
@@ -454,7 +600,7 @@ function createSettingsWindow() {
   }
   settingsWin = new BrowserWindow({
     width: 520,
-    height: 560,
+    height: 650,
     show: false,
     resizable: false,
     title: 'PCU Settings',
@@ -497,16 +643,10 @@ function applyHotkey() {
 // ---------- tray ----------
 
 function makeTrayIcon() {
-  const size = 16;
-  const buf = Buffer.alloc(size * size * 4);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const i = (y * size + x) * 4;
-      buf[i] = 0x4c; buf[i + 1] = 0x8b; buf[i + 2] = 0xf0; // #4c8bf0
-      buf[i + 3] = 0xff;
-    }
-  }
-  return nativeImage.createFromBitmap(buf, { width: size, height: size });
+  const scale = screen.getPrimaryDisplay()?.scaleFactor || 1;
+  const size = scale >= 2 ? 32 : scale >= 1.5 ? 24 : scale >= 1.25 ? 20 : 16;
+  const img = nativeImage.createFromPath(path.join(__dirname, 'assets', `icon-${size}.png`));
+  return img;
 }
 
 function createTray() {
@@ -567,6 +707,13 @@ app.whenReady().then(() => {
   readConfig();
   createStatusWindow();
   createBarWindow();
+  createOverlayWindow();
+  screen.on('display-metrics-changed', () => {
+    overlayBoundsCache = null;
+    if (overlayWin && !overlayWin.isDestroyed() && overlayWin.isVisible()) {
+      showOverlay();
+    }
+  });
   createTray();
   applyHotkey();
   spawnBackend();
@@ -581,7 +728,11 @@ app.on('before-quit', () => {
   quitting = true;
   clearTimeout(wsRetryTimer);
   clearTimeout(hideStatusTimer);
+  clearTimeout(overlayHideTimer);
+  stopOverlayPoll();
+  if (overlayWin && !overlayWin.isDestroyed()) overlayWin.destroy();
   killBackend();
+  forceRestoreCursor();
   if (ws) {
     try { ws.close(); } catch {}
   }

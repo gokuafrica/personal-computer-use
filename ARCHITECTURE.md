@@ -14,6 +14,7 @@ returns actions → execute → screenshot again) gets it done on screen.
 │  - instruction bar window  │                                    │    (OpenAI / Anthropic / │
 │  - status card window      │                                    │     any OpenAI-compat)   │
 │  - settings window         │                                    │  - screen capture (mss)  │
+│  - agent cursor overlay    │                                    │  - input control         │
 │  - spawns/kills backend    │                                    │  - input control         │
 └────────────────────────────┘                                    │    (SendInput/pyautogui) │
                                                                   │  - safety gate           │
@@ -29,8 +30,10 @@ backend/
   providers/         # openai.py, anthropic.py, openai_compat.py
   a11y.py            # UIA element grounding + typed-text verification
   screen.py          # capture, DPI, scaling
-  control.py         # mouse/keyboard execution
-  safety.py          # destructive-action gate
+   control.py         # mouse/keyboard execution (glide tween via duration)
+   cursor.py          # hide/restore native Windows cursor while a task runs
+   cursor_restore.py  # standalone force-restore script Electron runs if the backend dies
+   safety.py          # destructive-action gate
    config.py          # settings load/save (PCU_CONFIG_DIR/config.json; repo root in dev)
   doctor.py          # diagnostics checklist: python backend/doctor.py
   trajectory.py      # per-task recorder; writes trajectories/<ts>_<id>/ (screenshots,
@@ -41,7 +44,7 @@ electron/
   package.json
   main.js            # hotkey, tray, window mgmt, backend spawn, WS client
   preload.js
-  renderer/          # instruction-bar, status-card, settings (plain HTML/JS)
+  renderer/          # instruction-bar, status-card, settings, agent-overlay (plain HTML/JS)
   python-runtime/    # bundled Python 3.12 + backend deps (packaging only, gitignored)
   dist/              # electron-builder output (gitignored)
 
@@ -63,7 +66,29 @@ Electron passes these env vars to the spawned backend (dev and packaged):
   `repo-root/trajectories`; packaged: `%USERPROFILE%\Documents\PCU\trajectories`.
 
 Pacing: config key `action_delay_s` (seconds between executed actions, default
-0.4, clamped 0–5) is honored by the agent loop after each action.
+0.4, clamped 0–5) is honored by the agent loop after each action. Config key
+`pointer_glide_s` (default 0.45, clamped 0–1) is the pointer-glide intensity:
+moves tween with a distance-aware duration (~0.45s per 400px, clamped
+0.15–1.2s, ease-in-out; 0 = instant warp). `type`/`key` actions first glide the
+pointer to the focused control's center (`a11y.get_focused_center`, best-effort)
+so typing happens at the field instead of wherever the cursor idles. Electron
+converts backend action coords from physical pixels to DIP
+(`screen.screenToDIPPoint`) so overlay effects land on the actual click point
+at any DPI scale.
+
+Cursor overlay: config key `cursor_overlay` (default true, Settings toggle)
+controls the fullscreen transparent click-through Electron overlay shown while
+a task runs. It renders the Cua-style agent cursor (glow ring + halo), a fixed
+top-center banner ("PCU is in control", amber "Needs your approval" during the
+safety gate), a violet screen-edge glow, and per-action effects (click ripple,
+typing pill, keycap chip, scroll chevrons). It is a visual aid only, never
+intercepts input, and hides automatically on idle/error/disconnect/backend
+exit. While a task runs, `backend/cursor.py` hides the native arrow/I-beam/hand
+system cursors via SetSystemCursor so the agent pointer replaces the real one;
+the swap is restored in the loop's `finally` (SPI_SETCURSORS), via atexit, and
+by an Electron safety net (`forceRestoreCursor` runs `cursor_restore.py` when
+the backend exits or the app quits) so a hard-killed backend can never leave
+the user cursorless.
 
 
 ## WebSocket protocol (JSON, one object per message)
@@ -81,19 +106,24 @@ Pacing: config key `action_delay_s` (seconds between executed actions, default
 |---|---|---|
 | `status` | `state: "idle"\|"running"\|"awaiting_confirmation"\|"error"`, `message: str`, `step?: int`, `max_steps?: int` | general state updates |
 | `log` | `line: str` | human-readable progress line for the status card |
-| `action` | `kind: str`, `detail: str` | about to execute an action (click, type, …) |
+| `action` | `kind: str`, `detail: str`, `x?`, `y?` (physical px, clicks/moves only) | about to execute an action (click, type, …); x/y drive the cursor overlay's click effects |
 | `need_confirmation` | `id: str`, `reason: str`, `detail: str` | safety gate; blocks until `confirm` |
 | `task_done` | `id: str`, `success: bool`, `summary: str` | final result |
 
 ## Safety gate (MVP rules)
 
 Auto-approved: left/double/right click, scroll, move, wait, screenshot, key
-presses that are not on the blocklist.
-Blocked → require confirmation: typing or pressing that matches
+presses that are not dangerous (plain keys — including the delete key in a
+text editor — are reversible via undo and never gated).
+Blocked → require confirmation: typing text that matches
 `delete|remove|format|pay|purchase|checkout|send|submit|transfer|password|confirm`,
-and keys `alt+f4`, `ctrl+alt+delete`. The `win` key and `win+<key>` combos are
-allowed (reversible Start-menu/search/run navigation; gating them hung routine
-tasks). Hard cap: 25 steps per task.
+dangerous keys `alt+f4`, `ctrl+alt+delete`, and clicks on UI elements whose
+LABEL matches the click vocabulary `delete|remove|empty|pay|purchase|checkout|
+buy|transfer|send|submit|uninstall|shut down|restart|sign out|log out`
+(name only; a field's value is content and clicking it is benign — so Word's
+"Format" button in Find & Replace does not gate). The `win` key and
+`win+<key>` combos are allowed (reversible Start-menu/search/run navigation;
+gating them hung routine tasks). Hard cap: 25 steps per task.
 
 ## Coordinate contract
 
@@ -119,9 +149,9 @@ without a center or outside the model image are dropped.
 
 - Action vocabulary addition: `{"kind": "click_element", "id": <int>}` —
   resolves the element by id in the current step's UI tree, moves the mouse
-  to its stored physical center and left-clicks. The element's name+value
-  text is passed through the safety gate, so clicking a control named e.g.
-  "Delete File" is gated like typing "Delete". Unknown ids log
+  to its stored physical center and left-clicks. The element's name is passed
+  through the click-specific safety vocabulary, so clicking a control named
+  e.g. "Delete File" is gated like destructive actions. Unknown ids log
   "element id N not in current UI tree" and skip; they do not fail the task.
 - Only `openai_compat` consumes `a11y_context` (elements are listed in the
   user message and the model is told to prefer `click_element` when a

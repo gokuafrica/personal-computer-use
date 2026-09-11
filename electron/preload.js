@@ -23,5 +23,10 @@ contextBridge.exposeInMainWorld('pcu', {
     const wrapped = () => cb();
     ipcRenderer.on('bar-shown', wrapped);
     return () => ipcRenderer.removeListener('bar-shown', wrapped);
+  },
+  onOverlayCursor: (cb) => {
+    const wrapped = (_e, pt) => cb(pt);
+    ipcRenderer.on('overlay-cursor', wrapped);
+    return () => ipcRenderer.removeListener('overlay-cursor', wrapped);
   }
 });

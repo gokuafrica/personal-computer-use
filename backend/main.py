@@ -2,8 +2,9 @@
 
 Sets per-monitor-v2 DPI awareness BEFORE importing anything that touches the
 screen, then serves the WebSocket protocol from ARCHITECTURE.md on
-ws://127.0.0.1:8765. Handles one Electron client at a time; keeps serving on
-disconnect and waits for a reconnect.
+ws://127.0.0.1:8765. Broadcasts every event to ALL connected clients (a
+reconnecting Electron can never miss a running task's events); keeps serving
+on disconnect and waits for reconnects.
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ PORT = 8765
 
 class Backend:
     def __init__(self) -> None:
-        self.conn: Any = None
+        self.clients: set[Any] = set()
         self.runner: TaskRunner | None = None
         self.runner_task: asyncio.Task[None] | None = None
         self.last_status: dict[str, Any] = {
@@ -52,24 +53,19 @@ class Backend:
         print(f"[CUA] -> {kind}: {json.dumps(message, default=str)[:200]}", flush=True)
         if message.get("type") in ("status", "task_done"):
             self.last_status = dict(message)
-        conn = self.conn
-        if conn is None:
-            return
-        try:
-            await conn.send(json.dumps(message))
-        except Exception:
-            pass
+        payload = json.dumps(message)
+        for conn in list(self.clients):
+            try:
+                await conn.send(payload)
+            except Exception:
+                self.clients.discard(conn)
 
     async def handler(self, websocket: Any) -> None:
-        if self.conn is not None:
-            try:
-                await self.conn.close(code=4000, reason="new client connected")
-            except Exception:
-                pass
-        self.conn = websocket
+        self.clients.add(websocket)
         peer = getattr(websocket, "remote_address", None)
         print(f"[CUA] client connected: {peer}", flush=True)
         try:
+            await self.send(self.last_status)
             async for raw in websocket:
                 print(f"[CUA] <- {raw[:300]}", flush=True)
                 try:
@@ -84,9 +80,8 @@ class Backend:
         except websockets.ConnectionClosed:
             pass
         finally:
-            if self.conn is websocket:
-                self.conn = None
-            print("[CUA] client disconnected; waiting for reconnect", flush=True)
+            self.clients.discard(websocket)
+            print("[CUA] client disconnected", flush=True)
 
     async def handle(self, message: dict[str, Any]) -> None:
         msg_type = message.get("type")

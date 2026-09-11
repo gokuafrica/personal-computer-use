@@ -18,6 +18,8 @@ const fields = {
 };
 const hotkeyInput = document.getElementById('hotkey');
 const delayInput = document.getElementById('action-delay');
+const glideInput = document.getElementById('pointer-glide');
+const overlayToggle = document.getElementById('cursor-overlay');
 const toast = document.getElementById('toast');
 const errorBox = document.getElementById('error');
 
@@ -40,6 +42,10 @@ function fill(cfg) {
   delayInput.value = (typeof cfg.action_delay_s === 'number' && isFinite(cfg.action_delay_s))
     ? cfg.action_delay_s
     : 0.4;
+  glideInput.value = (typeof cfg.pointer_glide_s === 'number' && isFinite(cfg.pointer_glide_s))
+    ? cfg.pointer_glide_s
+    : 0.45;
+  overlayToggle.checked = cfg.cursor_overlay !== false;
   refreshFieldsets();
 }
 
@@ -64,7 +70,13 @@ function collect() {
       const n = Number(delayInput.value);
       if (!isFinite(n)) return 0.4;
       return Math.min(3, Math.max(0, n));
-    })()
+    })(),
+    pointer_glide_s: (() => {
+      const n = Number(glideInput.value);
+      if (!isFinite(n)) return 0.45;
+      return Math.min(1, Math.max(0, n));
+    })(),
+    cursor_overlay: overlayToggle.checked
   };
 }
 

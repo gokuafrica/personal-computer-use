@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable
 
 import pyautogui
 
-from backend import a11y, control, safety, screen
+from backend import a11y, control, cursor, safety, screen
 from backend.providers import StepResult, get_provider
 from backend.trajectory import new_recorder
 
@@ -17,7 +17,7 @@ SendFn = Callable[[dict[str, Any]], Awaitable[None]]
 CONFIRM_TIMEOUT_S = 120.0
 WAIT_CHUNK_S = 0.2
 MAX_WAIT_S = 10.0
-PROVIDER_STEP_TIMEOUT_S = 90.0
+PROVIDER_STEP_TIMEOUT_S = 30.0
 
 
 class _TaskStopped(Exception):
@@ -61,6 +61,11 @@ class TaskRunner:
         except (TypeError, ValueError):
             delay = 0.4
         self.action_delay_s = max(0.0, min(5.0, delay))
+        try:
+            glide = float(cfg.get("pointer_glide_s", 0.45))
+        except (TypeError, ValueError):
+            glide = 0.35
+        self.pointer_glide_s = max(0.0, min(1.0, glide))
         self.stop_event = asyncio.Event()
         self._confirm_event = asyncio.Event()
         self._confirm_id: str | None = None
@@ -133,7 +138,7 @@ class TaskRunner:
             "reason": "Safety gate matched a potentially destructive action",
             "detail": detail,
         })
-        await self._status("awaiting_confirmation", f"Confirmation required: {detail}")
+        await self._status("awaiting_confirmation", "Waiting for your approval")
         waited = 0.0
         while waited < CONFIRM_TIMEOUT_S:
             self._check_stop()
@@ -151,6 +156,16 @@ class TaskRunner:
         await self._log(f"Refused by user, skipping: {detail}")
         return False
 
+    def _glide_target(self) -> tuple[int, int] | None:
+        """Focused control's center for pointer-glide-before-type/key."""
+        try:
+            center = a11y.get_focused_center()
+        except Exception:
+            center = None
+        if not center or len(center) != 2:
+            return None
+        return center[0], center[1]
+
     async def _execute(
         self,
         action: dict[str, Any],
@@ -167,7 +182,7 @@ class TaskRunner:
                 raise ValueError(f"{kind} action missing coordinates")
             px = origin_x + round(float(x) * scale_x)
             py = origin_y + round(float(y) * scale_y)
-            await asyncio.to_thread(control.move, px, py)
+            await asyncio.to_thread(control.move, px, py, self.pointer_glide_s)
             if kind == "click":
                 await asyncio.to_thread(control.left_click)
             elif kind == "double_click":
@@ -179,15 +194,23 @@ class TaskRunner:
             py = action.get("py")
             if px is None or py is None:
                 raise ValueError("click_element missing resolved coordinates")
-            await asyncio.to_thread(control.move, px, py)
+            await asyncio.to_thread(control.move, px, py, self.pointer_glide_s)
             await asyncio.to_thread(control.left_click)
         elif kind == "scroll":
             amount = int(action.get("amount") or 1)
             direction = str(action.get("direction", "down"))
             await asyncio.to_thread(control.scroll, amount, direction)
         elif kind == "type":
+            # Humanized: glide the pointer to the field that is about to
+            # receive the text instead of typing with the cursor parked.
+            target = await asyncio.to_thread(self._glide_target)
+            if target is not None:
+                await asyncio.to_thread(control.move, target[0], target[1], self.pointer_glide_s)
             await asyncio.to_thread(control.type_text, str(action.get("text", "")))
         elif kind == "key":
+            target = await asyncio.to_thread(self._glide_target)
+            if target is not None:
+                await asyncio.to_thread(control.move, target[0], target[1], self.pointer_glide_s)
             await asyncio.to_thread(control.press_key, str(action.get("key", "")))
         elif kind == "wait":
             amount = min(MAX_WAIT_S, max(0.0, float(action.get("amount") or 1)))
@@ -299,6 +322,7 @@ class TaskRunner:
             return None
 
     async def run(self) -> None:
+        cursor.hide_native_cursor()
         try:
             await self._run()
         except _TaskStopped:
@@ -316,6 +340,8 @@ class TaskRunner:
         except Exception as exc:
             await self._status("error", str(exc))
             await self._finish(False, f"Task error: {exc}")
+        finally:
+            cursor.restore_native_cursor()
 
     async def _run(self) -> None:
         provider = get_provider(self.cfg)
@@ -332,26 +358,45 @@ class TaskRunner:
             self._steps = step
             self._recorder.save_screenshot(base64.b64decode(screenshot_b64), step)
             a11y_context = await self._capture_a11y(scale_x, scale_y, origin_x, origin_y)
-            try:
-                result = await asyncio.wait_for(
-                    provider.run_step(
-                        screenshot_b64,
-                        model_img.width,
-                        model_img.height,
-                        self.instruction,
-                        history,
-                        a11y_context=a11y_context,
-                    ),
-                    timeout=PROVIDER_STEP_TIMEOUT_S,
+            # One automatic retry when the provider hangs: nothing has been
+            # executed yet, so the same screenshot/history payload is safe
+            # to resend.
+            provider_timeout: asyncio.TimeoutError | None = None
+            for attempt in (1, 2):
+                try:
+                    result = await asyncio.wait_for(
+                        provider.run_step(
+                            screenshot_b64,
+                            model_img.width,
+                            model_img.height,
+                            self.instruction,
+                            history,
+                            a11y_context=a11y_context,
+                        ),
+                        timeout=PROVIDER_STEP_TIMEOUT_S,
+                    )
+                    provider_timeout = None
+                    break
+                except asyncio.TimeoutError as exc:
+                    provider_timeout = exc
+                    if attempt == 1:
+                        await self._log(
+                            f"provider step timed out after "
+                            f"{PROVIDER_STEP_TIMEOUT_S:.0f}s; retrying once"
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except _TaskStopped:
+                    raise
+                except pyautogui.FailSafeException:
+                    raise
+                except Exception as exc:
+                    raise RuntimeError(f"provider step failed: {exc}") from exc
+            if provider_timeout is not None:
+                raise RuntimeError(
+                    f"provider step timed out after "
+                    f"{PROVIDER_STEP_TIMEOUT_S:.0f}s (twice, with one retry)"
                 )
-            except asyncio.CancelledError:
-                raise
-            except _TaskStopped:
-                raise
-            except pyautogui.FailSafeException:
-                raise
-            except Exception as exc:
-                raise RuntimeError(f"provider step failed: {exc}") from exc
             history = result.state
             if result.summary:
                 await self._log(f"Model: {result.summary}")
@@ -387,20 +432,11 @@ class TaskRunner:
                             f"element id {action.get('id')} not in current UI tree"
                         )
                         continue
-                    name_value = " ".join(
-                        part
-                        for part in (
-                            str(element.get("name") or ""),
-                            str(element.get("value") or ""),
-                        )
-                        if part
-                    )
-                    # safety.check only matches type/key payloads, so route the
-                    # element's name+value text through the destructive-text
-                    # matcher (clicking "Delete File" must be gated like typing
-                    # "Delete").
-                    gate_detail = name_value or detail
-                    if safety.check("type", gate_detail) == "confirm":
+                    name = str(element.get("name") or "")
+                    # Clicks are gated by the control's LABEL with the
+                    # click-specific vocabulary; the field's VALUE is content
+                    # (e.g. text in an edit box) and clicking it is benign.
+                    if safety.check_click_element(name) == "confirm":
                         if not await self._gate(detail):
                             continue
                     center = element.get("center")
@@ -415,7 +451,23 @@ class TaskRunner:
                     if safety.check(kind, gate_detail) == "confirm":
                         if not await self._gate(detail):
                             continue
-                await self._emit({"type": "action", "kind": kind, "detail": detail})
+                # Structured physical coords let the Electron overlay place
+                # click effects at the target before the pointer arrives.
+                action_msg: dict[str, Any] = {
+                    "type": "action",
+                    "kind": kind,
+                    "detail": detail,
+                }
+                if kind in ("click", "double_click", "right_click", "move"):
+                    try:
+                        action_msg["x"] = origin_x + round(float(action.get("x")) * scale_x)
+                        action_msg["y"] = origin_y + round(float(action.get("y")) * scale_y)
+                    except (TypeError, ValueError):
+                        pass
+                elif kind == "click_element":
+                    action_msg["x"] = action.get("px")
+                    action_msg["y"] = action.get("py")
+                await self._emit(action_msg)
                 await self._execute(action, scale_x, scale_y, origin_x, origin_y)
                 if kind == "type":
                     state = await self._verify_after_type(

@@ -57,6 +57,14 @@
     <label for="action-delay">Action pacing (seconds between actions)</label>
     <input id="action-delay" type="number" min="0" max="3" step="0.1" value="0.4" />
 
+    <label for="pointer-glide">Pointer glide (seconds to travel to click targets)</label>
+    <input id="pointer-glide" type="number" min="0" max="1" step="0.05" value="0.45" />
+
+    <label class="check-row" for="cursor-overlay">
+      <input id="cursor-overlay" type="checkbox" />
+      Show agent cursor overlay while a task runs
+    </label>
+
     <div id="buttons">
       <button id="save" class="primary">Save</button>
       <span id="toast" class="hidden">Saved</span>

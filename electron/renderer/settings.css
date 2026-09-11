@@ -26,6 +26,22 @@ label {
   font-weight: 600;
 }
 
+label.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-weight: 400;
+  color: #e8eaf0;
+  cursor: pointer;
+}
+
+label.check-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: #2b5fc7;
+}
+
 input[type="text"], input[type="password"], input[type="number"], select {
   width: 100%;
   box-sizing: border-box;

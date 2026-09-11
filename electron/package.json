@@ -23,7 +23,8 @@
     "files": [
       "main.js",
       "preload.js",
-      "renderer/**/*"
+      "renderer/**/*",
+      "assets/**/*"
     ],
     "extraResources": [
       {
@@ -49,6 +50,7 @@
       }
     ],
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
         {
           "target": "nsis",

@@ -7,12 +7,16 @@ mouse is moved to a screen corner, which the agent loop treats as an abort.
 
 from __future__ import annotations
 
+import math
+
 import pyautogui
 
 pyautogui.PAUSE = 0.05
 pyautogui.FAILSAFE = True
 
 FailSafeException = pyautogui.FailSafeException
+
+WHEEL_DELTA = 120
 
 _KEY_ALIASES = {
     "win": "winleft",
@@ -38,8 +42,19 @@ def parse_combo(combo: str) -> list[str]:
     return [_map_key(part) for part in parts]
 
 
-def move(x: int, y: int) -> None:
-    pyautogui.moveTo(int(x), int(y), duration=0)
+def move(x: int, y: int, duration: float = 0.0) -> None:
+    """Move the pointer. With duration > 0 the move is a distance-aware tween
+    (longer moves take visibly longer, capped) so travel reads as human."""
+    x, y = int(x), int(y)
+    if duration <= 0:
+        pyautogui.moveTo(x, y, duration=0)
+        return
+    cur = pyautogui.position()
+    dist = math.hypot(x - cur.x, y - cur.y)
+    # ~0.45s per 400px baseline from the caller's duration, clamped so tiny
+    # nudges don't feel sluggish and cross-screen moves don't drag on.
+    effective = min(1.2, max(0.15, dist * duration / 400.0))
+    pyautogui.moveTo(x, y, duration=effective, tween=pyautogui.easeInOutQuad)
 
 
 def left_click() -> None:
@@ -55,7 +70,8 @@ def right_click() -> None:
 
 
 def scroll(amount: int, direction: str = "down") -> None:
-    clicks = max(1, abs(int(amount or 1)))
+    notches = max(1, abs(int(amount or 1)))
+    clicks = notches * WHEEL_DELTA
     direction = direction.lower()
     if direction == "up":
         pyautogui.scroll(clicks)

@@ -4,7 +4,6 @@ const pill = document.getElementById('state-pill');
 const action = document.getElementById('action');
 const log = document.getElementById('log');
 const confirmBox = document.getElementById('confirm-box');
-const confirmReason = document.getElementById('confirm-reason');
 const confirmDetail = document.getElementById('confirm-detail');
 
 const STATE_LABELS = {
@@ -22,6 +21,9 @@ function setState(state) {
 }
 
 function addLogLine(text) {
+  // A new task's "Task <id> started:" line marks a fresh run; the previous
+  // task's log lines are stale at that point, so clear them.
+  if (/^Task .+ started: /.test(text)) log.replaceChildren();
   const div = document.createElement('div');
   div.textContent = text;
   log.appendChild(div);
@@ -31,8 +33,7 @@ function addLogLine(text) {
 
 function showConfirm(id, reason, detail) {
   pendingConfirmId = id;
-  confirmReason.textContent = reason || 'This action needs your approval.';
-  confirmDetail.textContent = detail || '';
+  confirmDetail.textContent = detail || reason || 'This action needs your approval.';
   confirmBox.classList.remove('hidden');
 }
 

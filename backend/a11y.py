@@ -227,6 +227,21 @@ def read_foreground_text(max_len: int = 2000) -> str | None:
         return None
 
 
+def get_focused_center() -> tuple[int, int] | None:
+    """Physical-pixel center of the FOCUSED control, so the agent pointer can
+    glide to the field that is about to receive typed input. None on failure
+    or when the focused control has no usable rectangle."""
+    try:
+        auto = _import_uia()
+        control = auto.GetFocusedControl()
+        if control is None:
+            return None
+        return _safe_center(control) or None
+    except Exception as exc:
+        _warn_once(f"get_focused_center failed: {exc}")
+        return None
+
+
 def read_focused_value(max_len: int = 500) -> str | None:
     """Value/Name text of the FOCUSED control (typically the element that just
     received typed input). Returns None on failure, "" when the control exposes
