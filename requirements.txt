@@ -1,0 +1,8 @@
+websockets>=12
+mss>=9
+pillow>=10
+pyautogui>=0.9.54
+uiautomation>=2.0.20
+openai>=1.66
+anthropic>=0.40
+requests>=2.31

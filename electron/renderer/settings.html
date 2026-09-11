@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'" />
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <div id="wrap">
+    <h1>Settings</h1>
+
+    <label for="provider">Provider</label>
+    <select id="provider">
+      <option value="openai">OpenAI</option>
+      <option value="anthropic">Anthropic</option>
+      <option value="openai_compat">OpenAI-compatible</option>
+    </select>
+
+    <fieldset data-provider="openai">
+      <legend>OpenAI</legend>
+      <label for="openai-key">API key</label>
+      <div class="key-row">
+        <input id="openai-key" type="password" autocomplete="off" />
+        <button type="button" class="show-toggle" data-target="openai-key">Show</button>
+      </div>
+      <label for="openai-model">Model</label>
+      <input id="openai-model" type="text" />
+    </fieldset>
+
+    <fieldset data-provider="anthropic">
+      <legend>Anthropic</legend>
+      <label for="anthropic-key">API key</label>
+      <div class="key-row">
+        <input id="anthropic-key" type="password" autocomplete="off" />
+        <button type="button" class="show-toggle" data-target="anthropic-key">Show</button>
+      </div>
+      <label for="anthropic-model">Model</label>
+      <input id="anthropic-model" type="text" />
+    </fieldset>
+
+    <fieldset data-provider="openai_compat">
+      <legend>OpenAI-compatible endpoint</legend>
+      <label for="compat-url">Base URL</label>
+      <input id="compat-url" type="text" placeholder="https://example.com/v1" />
+      <label for="compat-key">API key</label>
+      <div class="key-row">
+        <input id="compat-key" type="password" autocomplete="off" />
+        <button type="button" class="show-toggle" data-target="compat-key">Show</button>
+      </div>
+      <label for="compat-model">Model</label>
+      <input id="compat-model" type="text" />
+    </fieldset>
+
+    <label for="hotkey">Global hotkey</label>
+    <input id="hotkey" type="text" placeholder="Control+Alt+K" />
+
+    <label for="action-delay">Action pacing (seconds between actions)</label>
+    <input id="action-delay" type="number" min="0" max="3" step="0.1" value="0.4" />
+
+    <div id="buttons">
+      <button id="save" class="primary">Save</button>
+      <span id="toast" class="hidden">Saved</span>
+    </div>
+    <div id="error" class="hidden"></div>
+  </div>
+  <script src="settings.js"></script>
+</body>
+</html>

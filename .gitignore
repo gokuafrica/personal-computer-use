@@ -1,0 +1,11 @@
+config.json
+trajectories/
+dist/
+*.log
+electron/python-runtime/
+node_modules/
+__pycache__/
+backend/tests/report.json
+.venv/
+venv/
+.DS_Store

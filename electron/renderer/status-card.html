@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'" />
+  <link rel="stylesheet" href="status-card.css" />
+</head>
+<body>
+  <div id="card">
+    <div id="header">
+      <span id="state-pill" class="pill idle">Idle</span>
+      <button id="stop" title="Stop the current task">Stop</button>
+    </div>
+    <div id="action">Waiting&hellip;</div>
+    <div id="confirm-box" class="hidden">
+      <div id="confirm-reason"></div>
+      <div id="confirm-detail"></div>
+      <div id="confirm-buttons">
+        <button id="approve" class="primary">Approve</button>
+        <button id="reject">Reject</button>
+      </div>
+    </div>
+    <div id="log"></div>
+  </div>
+  <script src="status-card.js"></script>
+</body>
+</html>

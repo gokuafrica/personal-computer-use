@@ -1,0 +1,57 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  font-family: "Segoe UI", sans-serif;
+}
+
+#bar {
+  margin: 8px;
+  padding: 14px 16px 10px;
+  border-radius: 14px;
+  background: rgba(24, 26, 32, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  box-sizing: border-box;
+  height: calc(100vh - 16px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+#instruction {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  color: #f2f4f8;
+  font-size: 16px;
+  padding: 10px 12px;
+  outline: none;
+}
+
+#instruction:focus {
+  border-color: #4c8bf0;
+}
+
+#instruction:disabled {
+  opacity: 0.6;
+}
+
+#hint {
+  margin-top: 7px;
+  font-size: 12px;
+  color: #8a90a0;
+}
+
+#running {
+  margin-top: 7px;
+  font-size: 13px;
+  color: #e8b34c;
+}
+
+.hidden {
+  display: none;
+}

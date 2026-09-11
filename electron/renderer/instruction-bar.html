@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'" />
+  <link rel="stylesheet" href="instruction-bar.css" />
+</head>
+<body>
+  <div id="bar">
+    <input id="instruction" type="text" autocomplete="off" spellcheck="false"
+           placeholder="What should I do on your computer?" />
+    <div id="hint">Enter to run &middot; Esc to close</div>
+    <div id="running" class="hidden">Running&hellip; click to view status</div>
+  </div>
+  <script src="instruction-bar.js"></script>
+</body>
+</html>
