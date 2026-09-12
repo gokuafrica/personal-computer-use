@@ -406,8 +406,12 @@ class Backend:
             )
 
 
-def _register_config_secrets() -> None:
-    """Teach the filter the configured key(s) so exact matches get redacted."""
+def _register_config_secrets() -> dict[str, Any]:
+    """Teach the filter the configured key(s) so exact matches get redacted.
+
+    Returns the loaded config so startup follow-ups (trajectory retention
+    prune) reuse the same values without a second disk read.
+    """
     cfg = config_mod.load()
     for section in config_mod.PROVIDER_SECTIONS:
         sub = cfg.get(section)
@@ -418,10 +422,32 @@ def _register_config_secrets() -> None:
     top = cfg.get("apiKey")
     if isinstance(top, str) and top.strip():
         secrets_filter.register_secret(top)
+    return cfg
+
+
+def _startup_prune(cfg: dict[str, Any]) -> None:
+    """Bounded trajectory retention at server startup. Best-effort, never raises."""
+    try:
+        from backend.trajectory import prune_trajectory_root
+
+        try:
+            days = float(cfg.get("trajectoryRetentionDays", 7))
+        except (TypeError, ValueError):
+            days = 7.0
+        try:
+            max_mb = float(cfg.get("trajectoryMaxTotalMb", 200))
+        except (TypeError, ValueError):
+            max_mb = 200.0
+        prune_trajectory_root(
+            max_age_days=max(0.0, days), max_total_mb=max(0.0, max_mb)
+        )
+    except Exception as exc:
+        _safe_print(f"[CUA] startup trajectory prune skipped: {exc}")
 
 
 async def amain() -> None:
-    _register_config_secrets()
+    cfg = _register_config_secrets()
+    _startup_prune(cfg)
     backend = Backend()
     backend.issue_runtime_token()
     try:

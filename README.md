@@ -65,7 +65,8 @@ Output lands in `electron/dist/`: `Personal Computer Use Setup 1.0.0.exe`
 private Python 3.12 runtime (`electron/python-runtime/`) with all backend deps —
 the target machine needs no Python installed. When installed, config lives in
 `%APPDATA%\personal-computer-use\config.json` (Electron userData) and task
-trajectories in `%USERPROFILE%\Documents\PCU\trajectories`. In dev mode,
+trajectories in `%LOCALAPPDATA%\PCU\trajectories` (local app data, kept out of
+OneDrive-synced Documents on purpose). In dev mode,
 config stays at the repo root and trajectories in `trajectories/`.
 
 ## Diagnostics & debugging

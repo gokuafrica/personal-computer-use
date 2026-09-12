@@ -231,8 +231,10 @@ function showNotification(title, body) {
 function backendEnv() {
   const env = { ...process.env, PCU_CONFIG_DIR: configDirPath() };
   // An explicitly provided PCU_TRAJECTORY_DIR wins (isolated validation hook).
+  // Packaged default is local app data (not Documents, which may be OneDrive-synced
+  // and would upload screenshots to cloud): %LOCALAPPDATA%\PCU\trajectories.
   env.PCU_TRAJECTORY_DIR = process.env.PCU_TRAJECTORY_DIR || (app.isPackaged
-    ? path.join(os.homedir(), 'Documents', 'PCU', 'trajectories')
+    ? path.join(app.getPath('home'), 'AppData', 'Local', 'PCU', 'trajectories')
     : path.join(ROOT, 'trajectories'));
   return env;
 }

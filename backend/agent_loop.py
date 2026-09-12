@@ -10,7 +10,7 @@ import pyautogui
 
 from backend import a11y, control, cursor, safety, screen, secrets_filter
 from backend.providers import StepResult, get_provider
-from backend.trajectory import new_recorder
+from backend.trajectory import new_recorder, prune_trajectory_root
 
 SendFn = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -82,7 +82,25 @@ class TaskRunner:
         self._recorder = new_recorder(
             task_id, instruction,
             save_screenshots=bool(cfg.get("saveScreenshots", False)),
+            # Explicit "all" keeps the legacy per-step files; anything else
+            # (missing, empty, unknown) falls back to the lighter "last".
+            screenshot_mode=(
+                "all" if str(cfg.get("saveScreenshotsMode", "") or "").strip().lower()
+                == "all" else "last"
+            ),
         )
+        # Retention settings snapshot at construction (prune runs once, at
+        # task finish); 0/None disables the respective rule.
+        try:
+            retention_days = float(cfg.get("trajectoryRetentionDays", 7))
+        except (TypeError, ValueError):
+            retention_days = 7.0
+        try:
+            retention_mb = float(cfg.get("trajectoryMaxTotalMb", 200))
+        except (TypeError, ValueError):
+            retention_mb = 200.0
+        self._retention_days = max(0.0, retention_days)
+        self._retention_mb = max(0.0, retention_mb)
         self._steps = 0
         self._completion_held = False
 
@@ -108,6 +126,16 @@ class TaskRunner:
     async def _finish(self, success: bool, summary: str) -> None:
         self._finished = True
         self._recorder.finish(success, summary, self._steps)
+        # Bounded retention, best-effort, once per task run. Never raises,
+        # so task completion can never be disturbed by pruning.
+        try:
+            prune_trajectory_root(
+                self._recorder.root,
+                max_age_days=self._retention_days,
+                max_total_mb=self._retention_mb,
+            )
+        except Exception:
+            pass
         await self._emit({
             "type": "task_done",
             "id": self.task_id,

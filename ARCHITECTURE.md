@@ -63,7 +63,9 @@ Electron passes these env vars to the spawned backend (dev and packaged):
   `config.json` over so saved API keys survive. Backend `save()` creates the
   directory if missing.
 - `PCU_TRAJECTORY_DIR` — trajectory root for `trajectory.new_recorder`. Dev:
-  `repo-root/trajectories`; packaged: `%USERPROFILE%\Documents\PCU\trajectories`.
+  `repo-root/trajectories`; packaged: `%LOCALAPPDATA%\PCU\trajectories` (local
+  app data rather than Documents, which is often OneDrive-synced — trajectory
+  screenshots must not leave the machine).
 
 Pacing: config key `action_delay_s` (seconds between executed actions, default
 0.4, clamped 0–5) is honored by the agent loop after each action. Config key

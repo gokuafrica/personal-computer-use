@@ -53,7 +53,9 @@ def _temp_config(monkey: "ConfigPatcher") -> Path:
     """Point config_mod at an isolated temp dir; returns the config path."""
     import backend.config as config_mod
 
-    tmp = Path(tempfile.mkdtemp(prefix="pcu-test-config-"))
+    tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-config-")
+    monkey.case.addCleanup(tmpCtx.cleanup)
+    tmp = Path(tmpCtx.name)
     monkey.config_path = tmp / "config.json"
     monkey.legacy_path = tmp / "legacy-config.json"
     return monkey.config_path
@@ -128,7 +130,9 @@ class ConfigMigrationTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "win32", "DPAPI requires Windows")
     def test_legacy_plaintext_migrated_and_removed(self):
         with ConfigPatcher(self) as patcher:
-            tmp = Path(tempfile.mkdtemp(prefix="pcu-test-migrate-"))
+            tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-migrate-")
+            self.addCleanup(tmpCtx.cleanup)
+            tmp = Path(tmpCtx.name)
             patcher.apply(tmp / "config.json", tmp / "legacy.json")
             (patcher.config_path).write_text(json.dumps({
                 "provider": "openai_compat",
@@ -152,7 +156,9 @@ class ConfigMigrationTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "win32", "DPAPI requires Windows")
     def test_save_never_writes_plaintext(self):
         with ConfigPatcher(self) as patcher:
-            tmp = Path(tempfile.mkdtemp(prefix="pcu-test-save-"))
+            tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-save-")
+            self.addCleanup(tmpCtx.cleanup)
+            tmp = Path(tmpCtx.name)
             patcher.apply(tmp / "config.json", tmp / "legacy.json")
             patcher.config_mod.save({
                 "provider": "openai",
@@ -166,7 +172,9 @@ class ConfigMigrationTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "win32", "DPAPI requires Windows")
     def test_key_status_view_has_no_key_material(self):
         with ConfigPatcher(self) as patcher:
-            tmp = Path(tempfile.mkdtemp(prefix="pcu-test-status-"))
+            tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-status-")
+            self.addCleanup(tmpCtx.cleanup)
+            tmp = Path(tmpCtx.name)
             patcher.apply(tmp / "config.json", tmp / "legacy.json")
             patcher.config_mod.save({
                 "provider": "openai",
@@ -196,7 +204,9 @@ class RotationTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "win32", "DPAPI requires Windows")
     def test_bundled_rotation_replaces_key(self):
         with ConfigPatcher(self) as patcher:
-            tmp = Path(tempfile.mkdtemp(prefix="pcu-test-rot-"))
+            tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-rot-")
+            self.addCleanup(tmpCtx.cleanup)
+            tmp = Path(tmpCtx.name)
             patcher.apply(tmp / "config.json", tmp / "legacy.json")
             self._seed_bundled(patcher, FAKE_KEY_A, 1)
 
@@ -213,7 +223,9 @@ class RotationTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "win32", "DPAPI requires Windows")
     def test_user_key_never_overwritten(self):
         with ConfigPatcher(self) as patcher:
-            tmp = Path(tempfile.mkdtemp(prefix="pcu-test-rot2-"))
+            tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-rot2-")
+            self.addCleanup(tmpCtx.cleanup)
+            tmp = Path(tmpCtx.name)
             patcher.apply(tmp / "config.json", tmp / "legacy.json")
             self._seed_bundled(patcher, FAKE_KEY_A, 1)
             disk = json.loads(patcher.config_path.read_text(encoding="utf-8"))
@@ -230,7 +242,9 @@ class RotationTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "win32", "DPAPI requires Windows")
     def test_bundled_same_version_is_noop(self):
         with ConfigPatcher(self) as patcher:
-            tmp = Path(tempfile.mkdtemp(prefix="pcu-test-rot3-"))
+            tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-rot3-")
+            self.addCleanup(tmpCtx.cleanup)
+            tmp = Path(tmpCtx.name)
             patcher.apply(tmp / "config.json", tmp / "legacy.json")
             self._seed_bundled(patcher, FAKE_KEY_A, 5)
 
@@ -436,8 +450,11 @@ class TrajectoryFilteringTests(unittest.TestCase):
     def test_screenshot_persistence_gated(self):
         from backend.trajectory import TrajectoryRecorder
 
-        tmp = Path(tempfile.mkdtemp(prefix="pcu-test-traj-"))
-        rec = TrajectoryRecorder("t1", "instruction", root=tmp, save_screenshots=False)
+        tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-traj-")
+        self.addCleanup(tmpCtx.cleanup)
+        tmp = Path(tmpCtx.name)
+        rec = TrajectoryRecorder("t1", "instruction", root=tmp,
+                                 save_screenshots=False, screenshot_mode="all")
         rec.save_screenshot(b"png", 1)
         self.assertFalse(list(tmp.glob("*")))
         rec.save_screenshots = True
@@ -447,7 +464,9 @@ class TrajectoryFilteringTests(unittest.TestCase):
     def test_instruction_redacted_in_task_json(self):
         from backend.trajectory import TrajectoryRecorder
 
-        tmp = Path(tempfile.mkdtemp(prefix="pcu-test-traj2-"))
+        tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-traj2-")
+        self.addCleanup(tmpCtx.cleanup)
+        tmp = Path(tmpCtx.name)
         rec = TrajectoryRecorder("t1", f"type {FAKE_KEY_A}", root=tmp)
         rec.save_event({"type": "log", "line": f"seen {OPAQUE_SECRET}"})
         run_dir = rec._ensure_dir()
@@ -461,7 +480,9 @@ class TrajectoryFilteringTests(unittest.TestCase):
 class ProviderDumpTests(unittest.TestCase):
     def test_raw_dump_off_by_default(self):
         os.environ.pop("PCU_RAW_PROVIDER_DUMP", None)
-        tmp = Path(tempfile.mkdtemp(prefix="pcu-test-dump1-"))
+        tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-dump1-")
+        self.addCleanup(tmpCtx.cleanup)
+        tmp = Path(tmpCtx.name)
         old = os.environ.get("PCU_TRAJECTORY_DIR")
         os.environ["PCU_TRAJECTORY_DIR"] = str(tmp)
         try:
@@ -477,7 +498,9 @@ class ProviderDumpTests(unittest.TestCase):
                 os.environ["PCU_TRAJECTORY_DIR"] = old
 
     def test_raw_dump_opt_in_redacts(self):
-        tmp = Path(tempfile.mkdtemp(prefix="pcu-test-dump2-"))
+        tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-dump2-")
+        self.addCleanup(tmpCtx.cleanup)
+        tmp = Path(tmpCtx.name)
         old = os.environ.get("PCU_TRAJECTORY_DIR")
         old_dump = os.environ.get("PCU_RAW_PROVIDER_DUMP")
         os.environ["PCU_TRAJECTORY_DIR"] = str(tmp)
@@ -507,7 +530,9 @@ class RuntimeTokenAclTests(unittest.TestCase):
     def test_restrict_dacl_to_owner(self):
         from backend.main import _restrict_dacl_to_owner
 
-        tmp = Path(tempfile.mkdtemp(prefix="pcu-test-acl-"))
+        tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-acl-")
+        self.addCleanup(tmpCtx.cleanup)
+        tmp = Path(tmpCtx.name)
         path = tmp / "tokenfile"
         path.write_text("data", encoding="utf-8")
         self.assertTrue(_restrict_dacl_to_owner(path))
@@ -541,7 +566,9 @@ class WsIntegrationTests(unittest.TestCase):
 
         async def scenario() -> None:
             with ConfigPatcher(self) as patcher:
-                tmp = Path(tempfile.mkdtemp(prefix="pcu-test-ws-"))
+                tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-ws-")
+                self.addCleanup(tmpCtx.cleanup)
+                tmp = Path(tmpCtx.name)
                 patcher.apply(tmp / "config.json", tmp / "legacy.json")
                 backend = Backend()
                 backend.issue_runtime_token()
@@ -562,7 +589,9 @@ class WsIntegrationTests(unittest.TestCase):
 
         async def scenario() -> None:
             with ConfigPatcher(self) as patcher:
-                tmp = Path(tempfile.mkdtemp(prefix="pcu-test-ws2-"))
+                tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-ws2-")
+                self.addCleanup(tmpCtx.cleanup)
+                tmp = Path(tmpCtx.name)
                 patcher.apply(tmp / "config.json", tmp / "legacy.json")
                 backend = Backend()
                 token = backend.issue_runtime_token()
@@ -589,7 +618,9 @@ class WsIntegrationTests(unittest.TestCase):
 
         async def scenario() -> None:
             with ConfigPatcher(self) as patcher:
-                tmp = Path(tempfile.mkdtemp(prefix="pcu-test-ws3-"))
+                tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-ws3-")
+                self.addCleanup(tmpCtx.cleanup)
+                tmp = Path(tmpCtx.name)
                 patcher.apply(tmp / "config.json", tmp / "legacy.json")
                 backend = Backend()
                 token = backend.issue_runtime_token()
@@ -629,7 +660,9 @@ class WsPreHandshakeTests(unittest.TestCase):
 
         async def scenario() -> None:
             with ConfigPatcher(self) as patcher:
-                tmp = Path(tempfile.mkdtemp(prefix="pcu-test-wsph1-"))
+                tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-wsph1-")
+                self.addCleanup(tmpCtx.cleanup)
+                tmp = Path(tmpCtx.name)
                 patcher.apply(tmp / "config.json", tmp / "legacy.json")
                 backend = Backend()
                 token = backend.issue_runtime_token()
@@ -654,7 +687,9 @@ class WsPreHandshakeTests(unittest.TestCase):
 
         async def scenario() -> None:
             with ConfigPatcher(self) as patcher:
-                tmp = Path(tempfile.mkdtemp(prefix="pcu-test-wsph2-"))
+                tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-wsph2-")
+                self.addCleanup(tmpCtx.cleanup)
+                tmp = Path(tmpCtx.name)
                 patcher.apply(tmp / "config.json", tmp / "legacy.json")
                 backend = Backend()
                 backend.issue_runtime_token()
@@ -677,7 +712,9 @@ class WsPreHandshakeTests(unittest.TestCase):
 
         async def scenario() -> None:
             with ConfigPatcher(self) as patcher:
-                tmp = Path(tempfile.mkdtemp(prefix="pcu-test-wsph3-"))
+                tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-wsph3-")
+                self.addCleanup(tmpCtx.cleanup)
+                tmp = Path(tmpCtx.name)
                 patcher.apply(tmp / "config.json", tmp / "legacy.json")
                 backend = Backend()
                 backend.issue_runtime_token()
@@ -703,7 +740,9 @@ class WsPreHandshakeTests(unittest.TestCase):
 
         async def scenario() -> None:
             with ConfigPatcher(self) as patcher:
-                tmp = Path(tempfile.mkdtemp(prefix="pcu-test-wsph4-"))
+                tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-wsph4-")
+                self.addCleanup(tmpCtx.cleanup)
+                tmp = Path(tmpCtx.name)
                 patcher.apply(tmp / "config.json", tmp / "legacy.json")
                 backend = Backend()
                 token = backend.issue_runtime_token()
@@ -730,7 +769,9 @@ class ConfigFailClosedTests(unittest.TestCase):
         import io
 
         with ConfigPatcher(self) as patcher:
-            tmp = Path(tempfile.mkdtemp(prefix="pcu-test-fc-load-"))
+            tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-fc-load-")
+            self.addCleanup(tmpCtx.cleanup)
+            tmp = Path(tmpCtx.name)
             patcher.apply(tmp / "config.json", tmp / "legacy.json")
             original = json.dumps({
                 "provider": "openai",
@@ -756,7 +797,9 @@ class ConfigFailClosedTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "win32", "DPAPI requires Windows")
     def test_save_refuses_credentialless_write(self):
         with ConfigPatcher(self) as patcher:
-            tmp = Path(tempfile.mkdtemp(prefix="pcu-test-fc-save-"))
+            tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-fc-save-")
+            self.addCleanup(tmpCtx.cleanup)
+            tmp = Path(tmpCtx.name)
             patcher.apply(tmp / "config.json", tmp / "legacy.json")
             patcher.config_mod.save({
                 "provider": "openai",
@@ -782,7 +825,9 @@ class ConfigFailClosedTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "win32", "DPAPI requires Windows")
     def test_save_allows_keyless_config(self):
         with ConfigPatcher(self) as patcher:
-            tmp = Path(tempfile.mkdtemp(prefix="pcu-test-fc-save2-"))
+            tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-fc-save2-")
+            self.addCleanup(tmpCtx.cleanup)
+            tmp = Path(tmpCtx.name)
             patcher.apply(tmp / "config.json", tmp / "legacy.json")
             # A config that never held a key must still save normally.
             patcher.config_mod.save({
@@ -796,7 +841,9 @@ class ConfigFailClosedTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "win32", "DPAPI requires Windows")
     def test_rotation_protection_failure_keeps_previous_key(self):
         with ConfigPatcher(self) as patcher:
-            tmp = Path(tempfile.mkdtemp(prefix="pcu-test-fc-rot-"))
+            tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-fc-rot-")
+            self.addCleanup(tmpCtx.cleanup)
+            tmp = Path(tmpCtx.name)
             patcher.apply(tmp / "config.json", tmp / "legacy.json")
             patcher.config_mod.save({
                 "provider": "openai",
@@ -822,7 +869,9 @@ class ConfigProvisionTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "win32", "DPAPI requires Windows")
     def _apply(self, patcher: ConfigPatcher, prefix: str) -> Path:
-        tmp = Path(tempfile.mkdtemp(prefix=prefix))
+        tmpCtx = tempfile.TemporaryDirectory(prefix=prefix)
+        self.addCleanup(tmpCtx.cleanup)
+        tmp = Path(tmpCtx.name)
         patcher.apply(tmp / "config.json", tmp / "legacy.json")
         return tmp
 
@@ -1252,7 +1301,9 @@ class BundledBackupTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "win32", "DPAPI requires Windows")
     def _apply(self, patcher: ConfigPatcher, prefix: str) -> Path:
-        tmp = Path(tempfile.mkdtemp(prefix=prefix))
+        tmpCtx = tempfile.TemporaryDirectory(prefix=prefix)
+        self.addCleanup(tmpCtx.cleanup)
+        tmp = Path(tmpCtx.name)
         patcher.apply(tmp / "config.json", tmp / "legacy.json")
         return tmp
 
@@ -1347,7 +1398,9 @@ class RestoreBundledTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "win32", "DPAPI requires Windows")
     def _apply(self, patcher: ConfigPatcher, prefix: str) -> Path:
-        tmp = Path(tempfile.mkdtemp(prefix=prefix))
+        tmpCtx = tempfile.TemporaryDirectory(prefix=prefix)
+        self.addCleanup(tmpCtx.cleanup)
+        tmp = Path(tmpCtx.name)
         patcher.apply(tmp / "config.json", tmp / "legacy.json")
         return tmp
 
@@ -1487,7 +1540,9 @@ class WsKeyOpTests(unittest.TestCase):
 
         async def scenario() -> None:
             with ConfigPatcher(self) as patcher:
-                tmp = Path(tempfile.mkdtemp(prefix="pcu-test-wskey1-"))
+                tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-wskey1-")
+                self.addCleanup(tmpCtx.cleanup)
+                tmp = Path(tmpCtx.name)
                 patcher.apply(tmp / "config.json", tmp / "legacy.json")
                 backend = Backend()
                 token = backend.issue_runtime_token()
@@ -1525,7 +1580,9 @@ class WsKeyOpTests(unittest.TestCase):
 
         async def scenario() -> None:
             with ConfigPatcher(self) as patcher:
-                tmp = Path(tempfile.mkdtemp(prefix="pcu-test-wskey2-"))
+                tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-wskey2-")
+                self.addCleanup(tmpCtx.cleanup)
+                tmp = Path(tmpCtx.name)
                 patcher.apply(tmp / "config.json", tmp / "legacy.json")
                 patcher.config_mod.save({
                     "provider": "openai",
@@ -1566,7 +1623,9 @@ class WsKeyOpTests(unittest.TestCase):
 
         async def scenario() -> None:
             with ConfigPatcher(self) as patcher:
-                tmp = Path(tempfile.mkdtemp(prefix="pcu-test-wskey3-"))
+                tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-wskey3-")
+                self.addCleanup(tmpCtx.cleanup)
+                tmp = Path(tmpCtx.name)
                 patcher.apply(tmp / "config.json", tmp / "legacy.json")
                 patcher.config_mod.rotate_key(FAKE_KEY_A, 3, "bundled")
                 patcher.config_mod.rotate_key(FAKE_KEY_B, None, "user")
@@ -1631,7 +1690,9 @@ class TypeActionPrivacyTests(unittest.TestCase):
 
         from backend.agent_loop import TaskRunner, _describe
 
-        tmp = Path(tempfile.mkdtemp(prefix="pcu-test-type-privacy-"))
+        tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-type-privacy-")
+        self.addCleanup(tmpCtx.cleanup)
+        tmp = Path(tmpCtx.name)
         sent: list[dict] = []
 
         async def send(message: dict) -> None:
@@ -1678,7 +1739,9 @@ class ProviderDumpScrubTests(unittest.TestCase):
 
         from backend.providers import openai_compat
 
-        tmp = Path(tempfile.mkdtemp(prefix="pcu-test-dump3-"))
+        tmpCtx = tempfile.TemporaryDirectory(prefix="pcu-test-dump3-")
+        self.addCleanup(tmpCtx.cleanup)
+        tmp = Path(tmpCtx.name)
         old_dir = os.environ.get("PCU_TRAJECTORY_DIR")
         old_dump = os.environ.get("PCU_RAW_PROVIDER_DUMP")
         os.environ["PCU_TRAJECTORY_DIR"] = str(tmp)
