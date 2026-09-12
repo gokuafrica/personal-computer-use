@@ -17,15 +17,33 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const WebSocket = require('ws');
+const { createSecretsFilter } = require('./secrets-filter');
+const { trustedRendererPath } = require('./ipc-trust');
 
 const ROOT = path.join(__dirname, '..');
 const BACKEND_URL = 'ws://127.0.0.1:8765';
 
+// Testability hook: PCU_CONFIG_DIR redirects the packaged app's config dir
+// (and Electron userData) away from %APPDATA%\<productName>. Used only by
+// isolated build validation; unset in normal use, so behavior is unchanged.
+const PCU_CONFIG_DIR_OVERRIDE = (process.env.PCU_CONFIG_DIR || '').trim();
+if (PCU_CONFIG_DIR_OVERRIDE) {
+  app.setPath('userData', PCU_CONFIG_DIR_OVERRIDE);
+}
+// Testability hook: PCU_AUTO_QUIT_MS makes the packaged app call app.quit()
+// after N ms so isolated build validation exercises the REAL quit path
+// (before-quit: killBackend + deleteRuntimeToken) without UI interaction.
+// Unset in normal use; no behavior change in production.
+const PCU_AUTO_QUIT_MS = parseInt(process.env.PCU_AUTO_QUIT_MS || '', 10) || 0;
+
 const DEFAULT_CONFIG = {
   provider: 'openai',
-  openai: { api_key: '', model: 'computer-use-preview' },
-  anthropic: { api_key: '', model: 'claude-3-7-sonnet-latest' },
-  openai_compat: { base_url: '', api_key: '', model: '' },
+  openai: { model: 'computer-use-preview' },
+  anthropic: { model: 'claude-3-7-sonnet-latest' },
+  openai_compat: { base_url: '', model: '' },
+  apiKeyEncrypted: null,
+  keySource: 'none',
+  keyVersion: 0,
   hotkey: 'Control+Alt+K',
   max_steps: 40,
   action_delay_s: 0.4,
@@ -35,7 +53,9 @@ const DEFAULT_CONFIG = {
 
 // ---------- config location ----------
 // Packaged: %APPDATA%/<productName> (Electron userData). Dev: repo root.
+// PCU_CONFIG_DIR wins over both (isolated build-validation hook).
 function configDirPath() {
+  if (PCU_CONFIG_DIR_OVERRIDE) return PCU_CONFIG_DIR_OVERRIDE;
   if (app.isPackaged) return app.getPath('userData');
   return ROOT;
 }
@@ -45,52 +65,94 @@ function configPath() {
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, 'config.json');
 }
-// True only when a provider section carries a non-empty api_key.
-function configHasApiKey(cfg) {
-  if (!cfg || typeof cfg !== 'object') return false;
-  for (const section of ['openai', 'anthropic', 'openai_compat']) {
+
+// ---------- secret provisioning ----------
+// Packaged apps ship NO seed: the NSIS installer provisions the bundled key
+// into the config dir as the DPAPI provision.json envelope (consumed by the
+// backend on first config load, then deleted). Dev (non-packaged) mode has a
+// repo seed at electron/default-config.json, which never enters app.asar.
+//
+// Electron itself NEVER persists key material anymore: safeStorage in this
+// Electron version emits Chromium OSCrypt v10/AES-GCM blobs (key in Local
+// State) that the backend's raw-DPAPI secret_store cannot decrypt. Every
+// credential write goes through the backend over the token-authenticated
+// WebSocket (rotate_key / restore_bundled); Electron only ever reads the
+// sanitized config for the settings summary and never writes key fields.
+const SECTIONS = ['openai', 'anthropic', 'openai_compat'];
+
+function extractLegacyKey(cfg) {
+  if (!cfg || typeof cfg !== 'object') return null;
+  if (typeof cfg.apiKey === 'string' && cfg.apiKey.trim() !== '') return cfg.apiKey.trim();
+  for (const section of SECTIONS) {
     const sub = cfg[section];
     if (sub && typeof sub === 'object' &&
-        typeof sub.api_key === 'string' && sub.api_key.trim() !== '') return true;
+        typeof sub.api_key === 'string' && sub.api_key.trim() !== '') return sub.api_key.trim();
   }
-  return false;
+  return null;
 }
 
-function migrateConfig() {
-  const dir = configDirPath();
-  const activePath = path.join(dir, 'config.json');
-  const legacyPath = path.join(ROOT, 'config.json');
-  if (path.relative(activePath, legacyPath) === '') return;
-  if (!fs.existsSync(legacyPath)) return;
-
-  const activeExists = fs.existsSync(activePath);
-  // An unreadable/corrupt active config is treated as empty so a valid
-  // legacy config can still rescue it; keys are never logged.
-  let activeIsEmpty = true;
-  if (activeExists) {
-    try {
-      activeIsEmpty = !configHasApiKey(JSON.parse(fs.readFileSync(activePath, 'utf8')));
-    } catch {}
+function stripPlaintextKeys(cfg) {
+  if (!cfg || typeof cfg !== 'object') return;
+  delete cfg.apiKey;
+  for (const section of SECTIONS) {
+    const sub = cfg[section];
+    if (sub && typeof sub === 'object') delete sub.api_key;
   }
-  let legacyHas = false;
-  try {
-    legacyHas = configHasApiKey(JSON.parse(fs.readFileSync(legacyPath, 'utf8')));
-  } catch {}
+}
 
-  // Copy when no active config yet; overwrite an existing active config
-  // only when it is untouched defaults (all api keys empty) and the legacy
-  // one holds a real key — this repairs installs where defaults were
-  // written before migration. A legacy config with a non-empty key wins
-  // entirely over an empty-key active config; an empty-key legacy never
-  // overwrites an active config that has keys.
-  const shouldCopy = !activeExists || (activeIsEmpty && legacyHas);
-  if (!shouldCopy) return;
+// Secrets that must never survive into forwarded logs; rebuilt whenever a new
+// value becomes known to the main process only.
+const knownSecrets = new Set();
+let redact = createSecretsFilter([]);
+
+function addKnownSecret(value) {
+  if (typeof value !== 'string' || value.length < 8) return;
+  if (knownSecrets.has(value)) return;
+  knownSecrets.add(value);
+  redact = createSecretsFilter([...knownSecrets]);
+}
+
+// Per-launch WebSocket token: the backend writes runtime_token (user-only ACL)
+// into the config dir at startup and deletes it at shutdown; the app deletes a
+// stale copy on quit as a safety net.
+function runtimeTokenPath() {
+  return path.join(configDirPath(), 'runtime_token');
+}
+
+function readRuntimeToken() {
   try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.copyFileSync(legacyPath, activePath);
-    console.log('[config] migrated legacy config.json ->', activePath);
-  } catch (err) {
-    console.log('[config] migration failed:', err.message);
+    const token = fs.readFileSync(runtimeTokenPath(), 'utf8').trim();
+    if (token) addKnownSecret(token);
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
+function deleteRuntimeToken() {
+  try {
+    fs.rmSync(runtimeTokenPath(), { force: true });
+  } catch {}
+}
+
+// Electron never persists credentials: the backend is the single owner of
+// the DPAPI-protected store (config.json apiKeyEncrypted / bundledKeyEncrypted).
+// Key writes happen exclusively via the WS key ops (rotate_key / restore_bundled)
+// handled below; there is no local write fallback in any mode (fail closed).
+function provisionConfig() {
+  const cfgPath = configPath();
+  let raw = null;
+  try {
+    raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  } catch {
+    raw = null;
+  }
+  if (!raw || typeof raw !== 'object') {
+    // Fresh config: defaults only, no key fields. Legacy plaintext keys that
+    // may exist in a pre-existing config are left for the backend to migrate
+    // with its interoperable raw-DPAPI form on its first config load.
+    writeConfig(structuredClone(DEFAULT_CONFIG));
+    console.log('[config] provisioned user config at', cfgPath);
   }
 }
 
@@ -149,8 +211,14 @@ function deepMerge(base, extra) {
 
 function writeConfig(cfg) {
   const dir = configDirPath();
+  const out = structuredClone(cfg);
+  // Fail closed: plaintext key fields are NEVER persisted, whatever the state
+  // of the backend. Credential blobs (apiKeyEncrypted / bundledKeyEncrypted)
+  // are preserved byte-for-byte: only the backend produces them.
+  stripPlaintextKeys(out);
+  delete out.apiKey;
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(cfg, null, 2), 'utf8');
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(out, null, 2), 'utf8');
 }
 
 function showNotification(title, body) {
@@ -162,9 +230,10 @@ function showNotification(title, body) {
 
 function backendEnv() {
   const env = { ...process.env, PCU_CONFIG_DIR: configDirPath() };
-  env.PCU_TRAJECTORY_DIR = app.isPackaged
+  // An explicitly provided PCU_TRAJECTORY_DIR wins (isolated validation hook).
+  env.PCU_TRAJECTORY_DIR = process.env.PCU_TRAJECTORY_DIR || (app.isPackaged
     ? path.join(os.homedir(), 'Documents', 'PCU', 'trajectories')
-    : path.join(ROOT, 'trajectories');
+    : path.join(ROOT, 'trajectories'));
   return env;
 }
 
@@ -232,7 +301,7 @@ function spawnBackend() {
 
 function pipeBackend(proc) {
   const line = (buf) => buf.toString().trimEnd().split(/\r?\n/).forEach((l) => {
-    if (l) console.log('[backend]', l);
+    if (l) console.log('[backend]', redact(l));
   });
   proc.stdout.on('data', line);
   proc.stderr.on('data', line);
@@ -300,8 +369,13 @@ function forceRestoreCursor() {
 function connectWs() {
   if (quitting) return;
   clearTimeout(wsRetryTimer);
+  // Per-launch token is sent as an upgrade header, never in the URL and never
+  // the API key itself. Header name must match TOKEN_HEADER in backend/main.py.
+  const headers = {};
+  const token = readRuntimeToken();
+  if (token) headers['X-PCU-Token'] = token;
   try {
-    ws = new WebSocket(BACKEND_URL);
+    ws = new WebSocket(BACKEND_URL, { headers });
   } catch {
     scheduleReconnect();
     return;
@@ -324,6 +398,13 @@ function connectWs() {
   });
   ws.on('close', () => {
     wsUp = false;
+    // A pending key op can no longer be answered; fail it closed so the
+    // renderer is not left waiting until the timeout.
+    resolveKeyOp({
+      ok: false,
+      error: 'The key store connection was lost; the key was NOT changed. ' +
+        'Your existing key (if any) still works.'
+    });
     broadcastConnection(false);
     scheduleReconnect();
   });
@@ -346,6 +427,51 @@ function sendWs(obj) {
     return true;
   }
   return false;
+}
+
+// ---------- WS key operations (rotate_key / restore_bundled) ----------
+// All persisted credentials live in ONE DPAPI-protected store owned by the
+// backend (config.json apiKeyEncrypted + bundledKeyEncrypted backup of the
+// last-known bundled key). Electron never writes key material itself: these
+// ops are sent over the existing token-authenticated WebSocket and the
+// backend replies with a structured {"type":"key_op_result","op":...}
+// message. One outstanding op at a time (UI-driven, serialized).
+let keyOpWaiter = null;
+
+function resolveKeyOp(result) {
+  if (!keyOpWaiter) return;
+  clearTimeout(keyOpWaiter.timer);
+  const waiter = keyOpWaiter;
+  keyOpWaiter = null;
+  waiter.resolve(result);
+}
+
+function sendKeyOpAwait(payload, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    if (!wsUp || !ws || ws.readyState !== WebSocket.OPEN) {
+      resolve({
+        ok: false,
+        error: 'The key store is not connected right now, so the key was NOT changed. ' +
+          'Your existing key (if any) still works. Try again in a moment.'
+      });
+      return;
+    }
+    keyOpWaiter = { op: payload.type, resolve, timer: null };
+    keyOpWaiter.timer = setTimeout(() => {
+      resolveKeyOp({
+        ok: false,
+        error: 'The key store did not respond in time; the key was NOT changed. ' +
+          'Your existing key (if any) still works.'
+      });
+    }, timeoutMs);
+    if (!sendWs(payload)) {
+      resolveKeyOp({
+        ok: false,
+        error: 'The key store is not connected right now, so the key was NOT changed. ' +
+          'Your existing key (if any) still works.'
+      });
+    }
+  });
 }
 
 function broadcastConnection(connected) {
@@ -377,6 +503,7 @@ function convertActionPoint(msg) {
 function handleBackendMessage(msg) {
   if (!msg || typeof msg.type !== 'string') return;
   if (msg.type === 'action') convertActionPoint(msg);
+  if (msg.type === 'key_op_result') resolveKeyOp(msg);
   if (statusWin && !statusWin.isDestroyed()) {
     statusWin.webContents.send('backend-message', msg);
   }
@@ -663,21 +790,148 @@ function createTray() {
 
 // ---------- IPC ----------
 
-ipcMain.handle('get-config', () => config);
+// Renderers may only be pages bundled in this app (file: URLs under renderer/).
+// Trust decision lives in ipc-trust.js (unit-tested with plain Node); packaged
+// asar layouts work because __dirname sits inside app.asar and asar paths are
+// plain strings.
+function rendererDir() {
+  return path.join(__dirname, 'renderer');
+}
 
-ipcMain.handle('save-config', (_e, cfg) => {
-  if (!cfg || typeof cfg !== 'object') throw new Error('Invalid config');
-  config = deepMerge(structuredClone(DEFAULT_CONFIG), cfg);
+function isTrustedSender(event) {
+  try {
+    const frame = event.senderFrame;
+    if (!frame || typeof frame.url !== 'string') return false;
+    return trustedRendererPath(frame.url, rendererDir());
+  } catch {
+    return false;
+  }
+}
+
+function assertTrustedSender(event) {
+  if (!isTrustedSender(event)) throw new Error('Untrusted IPC sender');
+}
+
+function configSummary() {
+  return {
+    provider: config.provider,
+    openai: { model: config.openai.model },
+    anthropic: { model: config.anthropic.model },
+    openai_compat: {
+      base_url: config.openai_compat.base_url,
+      model: config.openai_compat.model
+    },
+    hotkey: config.hotkey,
+    action_delay_s: config.action_delay_s,
+    pointer_glide_s: config.pointer_glide_s,
+    cursor_overlay: config.cursor_overlay,
+    keyConfigured: Boolean(config.apiKeyEncrypted || extractLegacyKey(config)),
+    keySource: config.keySource || 'none',
+    keyVersion: typeof config.keyVersion === 'number' ? config.keyVersion : 0,
+    // Kept for UI compatibility. safeStorage is no longer used to persist
+    // credentials (the backend owns the DPAPI store), so this now reflects
+    // the thing that actually gates key writes: whether the backend key
+    // store is reachable over the authenticated WebSocket.
+    keyEncryptionAvailable: wsUp
+  };
+}
+
+// Whitelist: renderers can never write key-bearing or unknown fields.
+function pickEditableConfig(cfg) {
+  const out = {};
+  if (!cfg || typeof cfg !== 'object') return out;
+  if (typeof cfg.provider === 'string') out.provider = cfg.provider;
+  if (cfg.openai && typeof cfg.openai === 'object' &&
+      typeof cfg.openai.model === 'string') out.openai = { model: cfg.openai.model };
+  if (cfg.anthropic && typeof cfg.anthropic === 'object' &&
+      typeof cfg.anthropic.model === 'string') out.anthropic = { model: cfg.anthropic.model };
+  if (cfg.openai_compat && typeof cfg.openai_compat === 'object') {
+    out.openai_compat = {};
+    if (typeof cfg.openai_compat.base_url === 'string') out.openai_compat.base_url = cfg.openai_compat.base_url;
+    if (typeof cfg.openai_compat.model === 'string') out.openai_compat.model = cfg.openai_compat.model;
+  }
+  if (typeof cfg.hotkey === 'string') out.hotkey = cfg.hotkey;
+  if (typeof cfg.action_delay_s === 'number' && Number.isFinite(cfg.action_delay_s)) {
+    out.action_delay_s = cfg.action_delay_s;
+  }
+  if (typeof cfg.pointer_glide_s === 'number' && Number.isFinite(cfg.pointer_glide_s)) {
+    out.pointer_glide_s = cfg.pointer_glide_s;
+  }
+  if (typeof cfg.cursor_overlay === 'boolean') out.cursor_overlay = cfg.cursor_overlay;
+  return out;
+}
+
+ipcMain.handle('get-config-summary', (e) => {
+  assertTrustedSender(e);
+  return configSummary();
+});
+
+ipcMain.handle('save-config', (e, cfg) => {
+  assertTrustedSender(e);
+  config = deepMerge(structuredClone(config), pickEditableConfig(cfg));
   const delay = Number(config.action_delay_s);
   config.action_delay_s = Number.isFinite(delay)
     ? Math.min(5, Math.max(0, delay))
     : DEFAULT_CONFIG.action_delay_s;
   writeConfig(config);
   applyHotkey();
-  return config;
+  return configSummary();
 });
 
-ipcMain.handle('submit-instruction', (_e, text) => {
+// One-way key set: the renderer sends a new key and never receives the stored
+// one back. Only summary data is returned. Fail closed: the key is stored by
+// the BACKEND (raw-DPAPI apiKeyEncrypted) over the token-authenticated WS;
+// when the backend is unreachable or reports a failure, nothing is written
+// locally, the existing stored key is preserved untouched, and a clear,
+// nontechnical error is surfaced. The key is registered with the secrets
+// filter before any logging (the WS payload itself is never logged).
+ipcMain.handle('set-api-key', async (e, key) => {
+  assertTrustedSender(e);
+  const plain = typeof key === 'string' ? key.trim() : '';
+  if (!plain) throw new Error('Empty API key');
+  addKnownSecret(plain);
+  const result = await sendKeyOpAwait({
+    type: 'rotate_key',
+    apiKey: plain,
+    keySource: 'user'
+  });
+  if (!result.ok) {
+    const message = result.error ||
+      'The key was NOT saved. Your existing key (if any) still works.';
+    console.warn('[config] set-api-key rejected:', redact(message), '(fail closed)');
+    showNotification('API key not saved', message);
+    throw new Error(message);
+  }
+  // The backend rewrote config.json; refresh the in-memory summary.
+  readConfig();
+  return configSummary();
+});
+
+// "Use built-in key": the backend restores its last-known bundled key from
+// bundledKeyEncrypted (maintained whenever a bundled key is adopted). Works
+// in packaged AND dev mode via the same WS verb. There is deliberately NO
+// local/seed fallback: Electron cannot persist credentials in a form the
+// backend can read (safeStorage = OSCrypt), so a local write would recreate
+// the very bug this removes. Fail closed: when no bundled backup exists (or
+// the restore fails) the current key is preserved and the reason is surfaced.
+ipcMain.handle('clear-api-key', async (e) => {
+  assertTrustedSender(e);
+  const result = await sendKeyOpAwait({ type: 'restore_bundled' });
+  if (!result.ok) {
+    const message = /no built-in key stored/i.test(String(result.error || ''))
+      ? 'No built-in key stored on this installation.'
+      : (result.error ||
+        'Could not restore the built-in key. Your current key still works.');
+    console.warn('[config] clear-api-key failed:', redact(message), '(fail closed)');
+    throw new Error(message);
+  }
+  // The backend rewrote config.json; refresh the in-memory summary.
+  readConfig();
+  return configSummary();
+});
+
+ipcMain.handle('submit-instruction', (e, text) => {
+  assertTrustedSender(e);
   const instruction = String(text || '').trim();
   if (!instruction) return { ok: false };
   const id = crypto.randomUUID();
@@ -686,13 +940,18 @@ ipcMain.handle('submit-instruction', (_e, text) => {
   return { ok: sent, id };
 });
 
-ipcMain.handle('stop-task', () => sendWs({ type: 'stop_task' }));
+ipcMain.handle('stop-task', (e) => {
+  assertTrustedSender(e);
+  return sendWs({ type: 'stop_task' });
+});
 
-ipcMain.handle('confirm', (_e, id, approved) => {
+ipcMain.handle('confirm', (e, id, approved) => {
+  assertTrustedSender(e);
   sendWs({ type: 'confirm', id: String(id || ''), approved: Boolean(approved) });
 });
 
-ipcMain.on('hide-bar', () => {
+ipcMain.on('hide-bar', (e) => {
+  if (!isTrustedSender(e)) return;
   if (barWin && !barWin.isDestroyed()) barWin.hide();
 });
 
@@ -703,8 +962,12 @@ app.setAppUserModelId('com.personal-computer-use.app');
 app.on('second-instance', showBar);
 
 app.whenReady().then(() => {
-  migrateConfig();
+  provisionConfig();
   readConfig();
+  // The stored credential blob is produced/owned by the backend (raw DPAPI)
+  // and is intentionally NOT decrypted in Electron: key-material redaction
+  // for forwarded backend output is done backend-side (secrets_filter), while
+  // the Electron filter covers the runtime token and user-entered keys.
   createStatusWindow();
   createBarWindow();
   createOverlayWindow();
@@ -718,6 +981,9 @@ app.whenReady().then(() => {
   applyHotkey();
   spawnBackend();
   connectWs();
+  if (PCU_AUTO_QUIT_MS > 0) {
+    setTimeout(() => app.quit(), PCU_AUTO_QUIT_MS);
+  }
 });
 
 app.on('window-all-closed', () => {
@@ -733,6 +999,7 @@ app.on('before-quit', () => {
   if (overlayWin && !overlayWin.isDestroyed()) overlayWin.destroy();
   killBackend();
   forceRestoreCursor();
+  deleteRuntimeToken();
   if (ws) {
     try { ws.close(); } catch {}
   }

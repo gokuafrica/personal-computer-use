@@ -1,0 +1,3 @@
+# Generated secret-bearing build input (by scripts/gen-seed-define.mjs).
+# Contains the bundled seed key - NEVER commit.
+build/seed-define.nsh

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .. import secrets_filter
 from .base import StepResult
 
 DEFAULT_MODEL = "computer-use-preview"
@@ -129,8 +130,10 @@ class OpenAIProvider:
                 checks = getattr(item, "pending_safety_checks", []) or []
                 if checks:
                     print(
-                        f"[openai] acknowledging {len(checks)} pending safety check(s); "
-                        "continuing",
+                        secrets_filter.filter_text(
+                            f"[openai] acknowledging {len(checks)} pending safety check(s); "
+                            "continuing"
+                        ),
                         flush=True,
                     )
                     pending_checks = [

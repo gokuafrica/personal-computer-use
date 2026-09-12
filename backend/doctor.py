@@ -25,7 +25,10 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-CONFIG_PATH = _ROOT / "config.json"
+from backend import config as config_mod  # noqa: E402
+from backend import secrets_filter  # noqa: E402
+
+CONFIG_PATH = config_mod.CONFIG_PATH
 HOST = "127.0.0.1"
 PORT = 8765
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) personal-computer-use/0.1"
@@ -71,7 +74,8 @@ class Doctor:
             line = f"[{tag}] {label.ljust(width)}"
             if detail:
                 line += f"  {detail}"
-            lines.append(line.rstrip())
+            # Filter at the output boundary: no secret material reaches stdout.
+            lines.append(secrets_filter.filter_text(line.rstrip()))
         return "\n".join(lines)
 
     def failed_critical(self) -> bool:
@@ -188,15 +192,27 @@ def check_config(doc: Doctor) -> dict[str, object] | None:
         doc.fail("config.json", "missing — start the app once or create it manually", critical=True)
         return None
     try:
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         doc.fail("config.json", f"unreadable/invalid JSON: {exc}", critical=True)
         return None
-    if not isinstance(cfg, dict):
-        doc.fail("config.json", "not a JSON object", critical=True)
-        return None
 
     doc.ok("config.json", "exists and parses")
+
+    # Runtime view: legacy plaintext is migrated on load and the decrypted
+    # key is materialized into the active provider section (memory only).
+    cfg = config_mod.load()
+
+    status = config_mod.key_status()
+    if status["encrypted"]:
+        doc.ok("key storage", f"DPAPI-encrypted, keySource={status['keySource']!r}, "
+                              f"keyVersion={status['keyVersion']!r}")
+    elif status["legacyPlaintext"]:
+        doc.warn("key storage", "plaintext present but DPAPI encryption failed "
+                                "(see config load); keySource="
+                                f"{status['keySource']!r}")
+    else:
+        doc.warn("key storage", "no key stored yet")
 
     provider = str(cfg.get("provider", "")).strip()
     if provider in ("openai", "anthropic", "openai_compat"):

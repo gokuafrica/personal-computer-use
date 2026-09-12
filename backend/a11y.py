@@ -15,6 +15,8 @@ from __future__ import annotations
 import sys
 from typing import Any
 
+from backend import secrets_filter
+
 _MAX_ELEMENTS = 120
 _MAX_DEPTH = 5
 _TEXT_ROLE_SUFFIX = "Control"
@@ -25,7 +27,7 @@ def _warn_once(message: str) -> None:
     global _WARNED
     if not _WARNED:
         _WARNED = True
-        print(f"[a11y] {message}", flush=True)
+        print(f"[a11y] {secrets_filter.filter_text(message)}", flush=True)
 
 
 def _import_uia():

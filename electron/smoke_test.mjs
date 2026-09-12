@@ -1,7 +1,14 @@
 import WebSocket from 'ws';
+import { authHeaders } from './ws_token.mjs';
 
 const URL = 'ws://127.0.0.1:8765';
-const ws = new WebSocket(URL);
+let ws;
+try {
+  ws = new WebSocket(URL, { headers: authHeaders() });
+} catch (err) {
+  console.error(err.message);
+  process.exit(4);
+}
 
 const messages = [];
 let doneCount = 0;

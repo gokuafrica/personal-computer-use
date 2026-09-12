@@ -45,10 +45,19 @@ from pathlib import Path
 from typing import Any
 
 from .base import StepResult
+from .. import secrets_filter
 
 MAX_TOKENS = 4096
 
 _DEBUG_REPORTED = {"dir": False}
+
+
+def _raw_dump_enabled() -> bool:
+    """Raw provider-reply dumps are OFF by default (family build).
+
+    Enabled only by an explicit opt-in: PCU_RAW_PROVIDER_DUMP=1.
+    """
+    return os.environ.get("PCU_RAW_PROVIDER_DUMP", "").strip() == "1"
 
 
 def _debug_dir() -> Path:
@@ -64,21 +73,34 @@ def _debug_dir() -> Path:
 
 
 def _dump_raw(tag: str, payload: dict[str, Any]) -> None:
-    """Append one raw-reply record as JSONL; never raises."""
+    """Append one redacted raw-reply record as JSONL; never raises.
+
+    No-op unless PCU_RAW_PROVIDER_DUMP=1. Even when enabled, secret material
+    is redacted before the record is written.
+    """
+    if not _raw_dump_enabled():
+        return
     try:
         d = _debug_dir()
         d.mkdir(parents=True, exist_ok=True)
-        record = {"ts": datetime.now(timezone.utc).isoformat(), "tag": tag, **payload}
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "tag": tag,
+            # Typed-action text (arbitrary passwords/PINs) is scrubbed from
+            # the raw model reply even in this opt-in debug dump.
+            **secrets_filter.scrub_typed_text(secrets_filter.redact_obj(payload)),
+        }
         with open(d / "raw_replies.jsonl", "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
-        if not _DEBUG_REPORTED["dir"]:
+        if not _DEBUG_REPORTED.get("dir"):
             _DEBUG_REPORTED["dir"] = True
             print(f"[openai_compat] raw replies dumped to {d / 'raw_replies.jsonl'}",
                   flush=True)
     except Exception as exc:
         if not _DEBUG_REPORTED.get("dump_err"):
             _DEBUG_REPORTED["dump_err"] = True
-            print(f"[openai_compat] could not dump raw reply: {exc}", flush=True)
+            print(f"[openai_compat] could not dump raw reply: "
+                  f"{secrets_filter.filter_text(str(exc))}", flush=True)
 
 SYSTEM_PROMPT = (
     "You are a Windows computer-use agent driving a real desktop. You receive a "

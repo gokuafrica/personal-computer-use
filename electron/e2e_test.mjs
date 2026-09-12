@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import { authHeaders } from './ws_token.mjs';
 
 // E2E driver: starts one task, records every backend event with timestamps,
 // and prints a summary. Exit code 0 = task succeeded.
@@ -6,7 +7,13 @@ import WebSocket from 'ws';
 // stream, this driver will time out — check the trajectory file in that case.
 const URL = 'ws://127.0.0.1:8765';
 const INSTRUCTION = process.argv[2] || "Open Notepad and type 'hello from PCU'";
-const ws = new WebSocket(URL);
+let ws;
+try {
+  ws = new WebSocket(URL, { headers: authHeaders() });
+} catch (err) {
+  console.error(err.message);
+  process.exit(4);
+}
 const t0 = Date.now();
 const events = [];
 let started = false;

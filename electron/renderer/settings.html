@@ -16,24 +16,23 @@
       <option value="openai_compat">OpenAI-compatible</option>
     </select>
 
+    <fieldset id="api-key-fieldset">
+      <legend>API key</legend>
+      <p id="key-status">Checking…</p>
+      <label for="new-api-key">New API key (leave blank to keep the current one)</label>
+      <input id="new-api-key" type="password" autocomplete="off" placeholder="Paste a new key here" />
+      <p class="hint">The key is stored encrypted on this computer and is never shown again after saving.</p>
+      <button id="clear-key" type="button" class="hidden">Remove my key and use the built-in one</button>
+    </fieldset>
+
     <fieldset data-provider="openai">
       <legend>OpenAI</legend>
-      <label for="openai-key">API key</label>
-      <div class="key-row">
-        <input id="openai-key" type="password" autocomplete="off" />
-        <button type="button" class="show-toggle" data-target="openai-key">Show</button>
-      </div>
       <label for="openai-model">Model</label>
       <input id="openai-model" type="text" />
     </fieldset>
 
     <fieldset data-provider="anthropic">
       <legend>Anthropic</legend>
-      <label for="anthropic-key">API key</label>
-      <div class="key-row">
-        <input id="anthropic-key" type="password" autocomplete="off" />
-        <button type="button" class="show-toggle" data-target="anthropic-key">Show</button>
-      </div>
       <label for="anthropic-model">Model</label>
       <input id="anthropic-model" type="text" />
     </fieldset>
@@ -42,11 +41,6 @@
       <legend>OpenAI-compatible endpoint</legend>
       <label for="compat-url">Base URL</label>
       <input id="compat-url" type="text" placeholder="https://example.com/v1" />
-      <label for="compat-key">API key</label>
-      <div class="key-row">
-        <input id="compat-key" type="password" autocomplete="off" />
-        <button type="button" class="show-toggle" data-target="compat-key">Show</button>
-      </div>
       <label for="compat-model">Model</label>
       <input id="compat-model" type="text" />
     </fieldset>

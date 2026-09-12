@@ -75,17 +75,15 @@ legend {
   padding: 0 6px;
 }
 
-.key-row {
-  display: flex;
-  gap: 8px;
+#key-status {
+  margin: 10px 0 0;
+  color: #e8eaf0;
 }
 
-.key-row input {
-  flex: 1;
-}
-
-.key-row button {
-  white-space: nowrap;
+.hint {
+  margin: 8px 0 4px;
+  color: #aab0bf;
+  font-size: 12px;
 }
 
 button {

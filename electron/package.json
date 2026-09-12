@@ -4,6 +4,9 @@
   "description": "Electron shell for the Personal Computer Use agent",
   "main": "main.js",
   "scripts": {
+    "seed-define": "node scripts/gen-seed-define.mjs",
+    "prebuild": "node scripts/gen-seed-define.mjs",
+    "predist": "node scripts/gen-seed-define.mjs",
     "start": "electron .",
     "dist": "electron-builder --win"
   },
@@ -20,17 +23,17 @@
     "directories": {
       "output": "dist"
     },
+    "beforePack": "./scripts/gen-seed-define.mjs",
+    "afterAllArtifactBuild": "./scripts/cleanup-seed-define.mjs",
     "files": [
       "main.js",
       "preload.js",
+      "secrets-filter.js",
+      "ipc-trust.js",
       "renderer/**/*",
       "assets/**/*"
     ],
     "extraResources": [
-      {
-        "from": "default-config.json",
-        "to": "config.json"
-      },
       {
         "from": "../backend",
         "to": "backend",
@@ -54,17 +57,16 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
-        },
-        {
-          "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "oneClick": true,
+      "perMachine": false,
+      "include": "build/installer.nsh"
     }
   }
 }

@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable
 
 import pyautogui
 
-from backend import a11y, control, cursor, safety, screen
+from backend import a11y, control, cursor, safety, screen, secrets_filter
 from backend.providers import StepResult, get_provider
 from backend.trajectory import new_recorder
 
@@ -33,7 +33,12 @@ def _describe(action: dict[str, Any]) -> str:
     if kind == "scroll":
         return f"scroll {action.get('direction', 'down')} x{action.get('amount', 3)}"
     if kind == "type":
-        return f"type {action.get('text', '')!r}"
+        # Display/persist/broadcast surface only: NEVER include the typed
+        # text here (it is often a password/PIN the secrets filter cannot
+        # pattern-match). The provider payload and control.type_text keep
+        # the real text so the automation still types it.
+        text = str(action.get("text") or "")
+        return f"type [typed text withheld: {len(text)} chars]"
     if kind == "key":
         return f"press {action.get('key', '')}"
     if kind == "wait":
@@ -74,13 +79,19 @@ class TaskRunner:
         self._finished = False
         self._current_a11y_elements: list[dict[str, Any]] = []
         self._a11y_unavailable_logged = False
-        self._recorder = new_recorder(task_id, instruction)
+        self._recorder = new_recorder(
+            task_id, instruction,
+            save_screenshots=bool(cfg.get("saveScreenshots", False)),
+        )
         self._steps = 0
         self._completion_held = False
 
     async def _emit(self, message: dict[str, Any]) -> None:
-        self._recorder.save_event(message)
-        await self.send(message)
+        # Redact at the boundary so trajectory files, WS clients and stdout
+        # never see secret material (typed text, provider errors, etc.).
+        safe_message = secrets_filter.redact_obj(message)
+        self._recorder.save_event(safe_message)
+        await self.send(safe_message)
 
     async def _log(self, line: str) -> None:
         await self._emit({"type": "log", "line": line})

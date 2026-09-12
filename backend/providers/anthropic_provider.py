@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .. import secrets_filter
 from .base import StepResult
 
 DEFAULT_MODEL = "claude-3-7-sonnet-latest"
@@ -101,8 +102,9 @@ class AnthropicProvider:
         a11y_context: dict[str, Any] | None = None,
     ) -> StepResult:
         if a11y_context:
-            print("[anthropic] a11y_context present but ignored (pixel-space protocol)",
-                  flush=True)
+            print(secrets_filter.filter_text(
+                "[anthropic] a11y_context present but ignored (pixel-space protocol)"),
+                flush=True)
         client = self._get_client()
         messages: list[dict[str, Any]] = [dict(m) for m in history] if history else []
         if not messages:

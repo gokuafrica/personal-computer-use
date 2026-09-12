@@ -2,12 +2,16 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Minimal, non-secret surface: renderers get a config summary (no key material,
+// only keyConfigured), can one-way set a new key, and drive tasks.
 contextBridge.exposeInMainWorld('pcu', {
   submitInstruction: (text) => ipcRenderer.invoke('submit-instruction', text),
   stopTask: () => ipcRenderer.invoke('stop-task'),
   confirm: (id, approved) => ipcRenderer.invoke('confirm', id, approved),
-  getConfig: () => ipcRenderer.invoke('get-config'),
+  getConfigSummary: () => ipcRenderer.invoke('get-config-summary'),
   saveConfig: (cfg) => ipcRenderer.invoke('save-config', cfg),
+  setApiKey: (key) => ipcRenderer.invoke('set-api-key', key),
+  clearApiKey: () => ipcRenderer.invoke('clear-api-key'),
   hideBar: () => ipcRenderer.send('hide-bar'),
   onBackendMessage: (cb) => {
     const wrapped = (_e, msg) => cb(msg);

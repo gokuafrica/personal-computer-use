@@ -3,6 +3,11 @@
 Designed to be wired into the agent loop LATER (this module must not import
 agent_loop). Every method swallows all exceptions and prints once to stdout on
 failure so callers can never crash because of recording.
+
+All persisted text (instructions, events, actions, result summaries) is
+routed through backend.secrets_filter before it hits disk; screenshots are
+only persisted when explicitly enabled (``save_screenshots=True``, config
+``saveScreenshots`` defaults to False in the family build).
 """
 
 from __future__ import annotations
@@ -15,6 +20,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from backend import secrets_filter
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_ROOT = ROOT / "trajectories"
@@ -37,10 +44,17 @@ class TrajectoryRecorder:
     lazily on the first write, together with ``task.json``.
     """
 
-    def __init__(self, task_id: str, instruction: str, root: str | Path = "trajectories") -> None:
+    def __init__(
+        self,
+        task_id: str,
+        instruction: str,
+        root: str | Path = "trajectories",
+        save_screenshots: bool = False,
+    ) -> None:
         self.task_id = str(task_id)
         self.instruction = str(instruction)
         self.root = Path(root)
+        self.save_screenshots = bool(save_screenshots)
         self.started_at = _now_iso()
         self._mono_start = time.monotonic()
         self._dir: Path | None = None
@@ -49,7 +63,8 @@ class TrajectoryRecorder:
     def _report(self, key: str, message: str) -> None:
         if key not in self._reported:
             self._reported.add(key)
-            print(f"[trajectory] {message}", file=sys.stdout, flush=True)
+            print(f"[trajectory] {secrets_filter.filter_text(message)}",
+                  file=sys.stdout, flush=True)
 
     def _ensure_dir(self) -> Path | None:
         if self._dir is not None:
@@ -60,7 +75,7 @@ class TrajectoryRecorder:
             run_dir.mkdir(parents=True, exist_ok=False)
             task_json = {
                 "task_id": self.task_id,
-                "instruction": self.instruction,
+                "instruction": secrets_filter.redact_text(self.instruction),
                 "started_at": self.started_at,
             }
             (run_dir / "task.json").write_text(
@@ -83,12 +98,15 @@ class TrajectoryRecorder:
         if path is None:
             return
         try:
+            record = secrets_filter.redact_obj(record)
             with open(path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
         except Exception as exc:
             self._report(key, f"could not write {filename}: {exc}")
 
     def save_screenshot(self, png_bytes: bytes, step: int) -> None:
+        if not self.save_screenshots:
+            return
         try:
             path = self._path(f"step_{int(step):02d}.png")
         except Exception as exc:
@@ -121,7 +139,7 @@ class TrajectoryRecorder:
             result = {
                 "task_id": self.task_id,
                 "success": bool(success),
-                "summary": str(summary),
+                "summary": secrets_filter.redact_text(str(summary)),
                 "steps": int(steps),
                 "started_at": self.started_at,
                 "finished_at": finished_at,
@@ -132,8 +150,19 @@ class TrajectoryRecorder:
             self._report("finish", f"could not write result.json: {exc}")
 
 
-def new_recorder(task_id: str, instruction: str, root: str | Path | None = None) -> TrajectoryRecorder:
-    """Create a recorder; PCU_TRAJECTORY_DIR env var overrides the default root."""
+def new_recorder(
+    task_id: str,
+    instruction: str,
+    root: str | Path | None = None,
+    save_screenshots: bool = False,
+) -> TrajectoryRecorder:
+    """Create a recorder; PCU_TRAJECTORY_DIR env var overrides the default root.
+
+    Screenshots are persisted only when ``save_screenshots`` is True (config
+    ``saveScreenshots``; defaults to False in the family build).
+    """
     if root is None:
         root = os.environ.get("PCU_TRAJECTORY_DIR") or DEFAULT_ROOT
-    return TrajectoryRecorder(task_id, instruction, root)
+    return TrajectoryRecorder(
+        task_id, instruction, root, save_screenshots=save_screenshots
+    )
