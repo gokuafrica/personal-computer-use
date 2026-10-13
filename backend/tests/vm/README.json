@@ -1,0 +1,15 @@
+{
+  "purpose": "Opt-in disposable Windows VM regression harness; never run input fixtures on a working desktop",
+  "skill": "vm-test-baseline",
+  "staging": "Copy the selected guest scripts to the disposable guest user Downloads directory",
+  "installedRuntime": "Use the installed Personal Computer Use resources/python-runtime/python.exe",
+  "tests": {
+    "interactions": "guest-interactions.py uses a loopback simulated VLM and the real installed app, screenshots, WinForms fixture and input stack",
+    "liveVision": "guest-live-vision.py requires signed-in Codex and test_codex_live.py staged in Downloads",
+    "lifecycle": "guest-lifecycle.py requires no other app instance; checks authentication, single instance, crash restart and clean quit",
+    "unit": "guest-unit-tests.py discovers extracted unit tests and imports installed modules",
+    "javascript": "guest-js.ps1 extracts production modules from installed app.asar and runs suites using bundled Electron Node mode",
+    "liveDesktop": "guest-live-desktop.py requires an already running installed app, signed-in Codex, a native focus check and real Approve click; --gated-only repeats approval case"
+  },
+  "privacy": "No credentials belong in these scripts or installer. VM-only login caches must be removed with clone cleanup."
+}

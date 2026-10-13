@@ -34,7 +34,7 @@ def _import_uia():
     import uiautomation as auto
 
     if hasattr(auto, "SetGlobalSearchTimeout"):
-        auto.SetGlobalSearchTimeout(1000)
+        auto.SetGlobalSearchTimeout(1.0)  # API uses seconds, not milliseconds.
     return auto
 
 
@@ -59,10 +59,13 @@ def _safe_center(control: Any) -> list[int] | None:
 
 def _safe_value(control: Any) -> str | None:
     try:
-        import uiautomation as auto
-        value = control.GetPropertyValue(auto.ValuePattern.ValueProperty)
-        if isinstance(value, str) and value:
+        value = control.GetValuePattern().Value
+        if isinstance(value, str):
             return value
+    except Exception:
+        pass
+    try:
+        return control.GetTextPattern().DocumentRange.GetText(2000)
     except Exception:
         pass
     return None
@@ -245,7 +248,7 @@ def get_focused_center() -> tuple[int, int] | None:
 
 
 def read_focused_value(max_len: int = 500) -> str | None:
-    """Value/Name text of the FOCUSED control (typically the element that just
+    """Actual value/text of the FOCUSED control (typically the element that just
     received typed input). Returns None on failure, "" when the control exposes
     no readable value."""
     try:
@@ -254,8 +257,7 @@ def read_focused_value(max_len: int = 500) -> str | None:
         if control is None:
             return None
         text = _safe_value(control)
-        if not text:
-            text = _safe_name(control)
+        # Name is often a field label such as "Text editor", not its contents.
         if not text:
             return ""
         return text[:max_len]

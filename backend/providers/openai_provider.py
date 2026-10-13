@@ -7,6 +7,7 @@ display_width/display_height, so they map 1:1 onto the normalized schema.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from .. import secrets_filter
@@ -58,13 +59,17 @@ class OpenAIProvider:
     def __init__(self, cfg: dict[str, Any]) -> None:
         section = cfg.get("openai", {})
         self.model = section.get("model") or DEFAULT_MODEL
+        # Key from the config section (the runtime materializes the stored
+        # credential into the ACTIVE provider section, memory only). Empty
+        # falls back to the OPENAI_API_KEY env var inside AsyncOpenAI.
+        self.api_key = (section.get("api_key") or "").strip() or None
         self._client = None
 
     def _get_client(self) -> Any:
         if self._client is None:
             from openai import AsyncOpenAI
 
-            self._client = AsyncOpenAI()
+            self._client = AsyncOpenAI(api_key=self.api_key)
         return self._client
 
     async def run_step(
@@ -79,7 +84,7 @@ class OpenAIProvider:
         if a11y_context:
             print("[openai] a11y_context present but ignored (pixel-space protocol)",
                   flush=True)
-        client = self._get_client()
+        client = await asyncio.to_thread(self._get_client)
         state: dict[str, Any] = dict(history) if history else {}
         tools: list[dict[str, Any]] = [
             {"type": "computer", "display_width": width, "display_height": height,

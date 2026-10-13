@@ -33,6 +33,10 @@ from .base import StepResult
 def get_provider(cfg: dict[str, Any]) -> Any:
     """Build a provider adapter from the root config dict."""
     name = str(cfg.get("provider", "openai")).lower()
+    if name == "codex":
+        from .codex_provider import CodexProvider
+
+        return CodexProvider(cfg)
     if name == "openai":
         from .openai_provider import OpenAIProvider
 

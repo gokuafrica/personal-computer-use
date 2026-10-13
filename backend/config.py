@@ -116,13 +116,20 @@ def _provision_meta_path() -> Path:
     return CONFIG_PATH.parent / PROVISION_META_NAME
 
 DEFAULTS: dict[str, Any] = {
-    "provider": "openai",
+    # Subscription builds carry no credential; each user signs in with ChatGPT.
+    "provider": "codex",
+    "codex": {"model": "gpt-6-luna", "reasoning_effort": "high"},
     "openai": {"api_key": "", "model": "computer-use-preview"},
     "anthropic": {"api_key": "", "model": "claude-3-7-sonnet-latest"},
-    "openai_compat": {"base_url": "", "api_key": "", "model": ""},
+    "openai_compat": {
+        "base_url": "https://opencode.ai/zen/go/v1",
+        "api_key": "",
+        "model": "glm-5.3-flash",
+    },
     "hotkey": "Control+Alt+K",
     "max_steps": 40,
     "action_delay_s": 0.4,
+    "confirm_actions": False,
     "saveScreenshots": False,
     "saveScreenshotsMode": "last",
     "trajectoryRetentionDays": 7,
@@ -162,6 +169,8 @@ def _legacy_has_key(raw: Any) -> bool:
 
 def _active_is_default_empty(raw: Any) -> bool:
     """True when no provider section holds a non-empty api_key."""
+    if isinstance(raw, dict) and raw.get("provider") == "codex":
+        return False  # A keyless subscription configuration is intentional.
     return not _legacy_has_key(raw)
 
 
@@ -272,7 +281,7 @@ def _materialize_runtime(cfg: dict[str, Any]) -> dict[str, Any]:
     """Put the decrypted key into the ACTIVE provider section (memory only)."""
     key = decrypt_key(cfg)
     provider = str(cfg.get("provider") or "")
-    if key and provider:
+    if key and provider in PROVIDER_SECTIONS:
         sub = cfg.get(provider)
         if isinstance(sub, dict) and not (sub.get("api_key") or "").strip():
             sub["api_key"] = key

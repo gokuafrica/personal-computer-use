@@ -4,9 +4,23 @@ trajectories/
 dist/
 *.log
 electron/python-runtime/
+electron/codex-runtime/
 node_modules/
 __pycache__/
 backend/tests/report.json
 .venv/
 venv/
 .DS_Store
+# Local credentials and generated provisioning material
+.env
+.env.*
+!.env.example
+!.env.template
+.codex/
+auth.json
+runtime_token
+provision.json
+seed-define.nsh
+*.key
+*.p12
+*.pfx

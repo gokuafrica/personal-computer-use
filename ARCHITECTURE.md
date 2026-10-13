@@ -6,6 +6,20 @@ returns actions → execute → screenshot again) gets it done on screen.
 
 ## Components
 
+The default provider is now `codex` / `gpt-6-luna`. It invokes a pinned Codex
+CLI with ChatGPT subscription authentication, an image and a strict JSON action
+schema. Codex produces one planned action per observation; the PCU backend owns
+execution, confirmation gates, coordinate scaling and Stop. Child processes are
+cancelled when the task stops. Temporary images are removed after each turn.
+The installer bundles the native CLI and its license, without credentials.
+The settings UI launches the official ChatGPT sign-in flow, and Codex owns
+credential storage and refresh. `PCU_CODEX_EXECUTABLE` selects the packaged binary.
+On launch, the subscription provider checks existing authentication and opens
+browser sign-in automatically if needed. `subscription-setup.js` coordinates
+startup and Settings so concurrent requests share one login. Pending/success/error
+states are sent to Settings; cancelled sign-in can be retried without restarting.
+The legacy OpenAI, Anthropic and OpenAI-compatible adapters remain selectable.
+
 ```
 ┌────────────────────────────┐         ws://127.0.0.1:8765        ┌──────────────────────────┐
 │  Electron shell (Node)     │◄──────────────────────────────────►│  Python agent backend    │
@@ -114,6 +128,13 @@ the user cursorless.
 
 ## Safety gate (MVP rules)
 
+`confirm_actions` defaults to false. The following heuristic gates run only when
+the user enables "Ask before potentially sensitive actions" in Settings. Stop,
+the input failsafe, step limit and Windows input restrictions remain active.
+Rejecting an action ends the task; it does not replay the rejected action.
+The status card is non-focusable and shown with `showInactive`; it hides when an
+upcoming click overlaps it, and sits at the top right to avoid notification toasts.
+
 Auto-approved: left/double/right click, scroll, move, wait, screenshot, key
 presses that are not dangerous (plain keys — including the delete key in a
 text editor — are reversible via undo and never gated).
@@ -155,7 +176,7 @@ without a center or outside the model image are dropped.
   through the click-specific safety vocabulary, so clicking a control named
   e.g. "Delete File" is gated like destructive actions. Unknown ids log
   "element id N not in current UI tree" and skip; they do not fail the task.
-- Only `openai_compat` consumes `a11y_context` (elements are listed in the
+- `codex` and `openai_compat` consume `a11y_context` (elements are listed in the
   user message and the model is told to prefer `click_element` when a
   suitable element is present); openai/anthropic are strict pixel-space
   protocols and ignore it.

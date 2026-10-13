@@ -9,6 +9,13 @@ contextBridge.exposeInMainWorld('pcu', {
   stopTask: () => ipcRenderer.invoke('stop-task'),
   confirm: (id, approved) => ipcRenderer.invoke('confirm', id, approved),
   getConfigSummary: () => ipcRenderer.invoke('get-config-summary'),
+  codexStatus: () => ipcRenderer.invoke('codex-status'),
+  codexLogin: () => ipcRenderer.invoke('codex-login'),
+  onCodexAuthState: (cb) => {
+    const wrapped = (_e, state) => cb(state);
+    ipcRenderer.on('codex-auth-state', wrapped);
+    return () => ipcRenderer.removeListener('codex-auth-state', wrapped);
+  },
   saveConfig: (cfg) => ipcRenderer.invoke('save-config', cfg),
   setApiKey: (key) => ipcRenderer.invoke('set-api-key', key),
   clearApiKey: () => ipcRenderer.invoke('clear-api-key'),

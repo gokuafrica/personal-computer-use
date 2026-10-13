@@ -1,16 +1,16 @@
 {
   "name": "personal-computer-use",
-  "version": "1.0.0",
+  "version": "1.1.4",
   "description": "Electron shell for the Personal Computer Use agent",
   "main": "main.js",
   "scripts": {
     "seed-define": "node scripts/gen-seed-define.mjs",
-    "prebuild": "node scripts/gen-seed-define.mjs",
-    "predist": "node scripts/gen-seed-define.mjs",
     "start": "electron .",
-    "dist": "electron-builder --win"
+    "dist": "electron-builder --win",
+    "prepare-codex": "node scripts/prepare-codex-runtime.mjs"
   },
   "devDependencies": {
+    "@openai/codex": "0.159.2",
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0"
   },
@@ -23,13 +23,13 @@
     "directories": {
       "output": "dist"
     },
-    "beforePack": "./scripts/gen-seed-define.mjs",
-    "afterAllArtifactBuild": "./scripts/cleanup-seed-define.mjs",
+    "beforePack": "./scripts/prepare-codex-runtime.mjs",
     "files": [
       "main.js",
       "preload.js",
       "secrets-filter.js",
       "ipc-trust.js",
+      "subscription-setup.js",
       "renderer/**/*",
       "assets/**/*"
     ],
@@ -50,6 +50,15 @@
           "**/*",
           "!**/__pycache__/**"
         ]
+      },
+      {
+        "from": "codex-runtime",
+        "to": "codex-runtime",
+        "filter": [
+          "codex.exe",
+          "LICENSE",
+          "version.txt"
+        ]
       }
     ],
     "win": {
@@ -65,8 +74,9 @@
     },
     "nsis": {
       "oneClick": true,
+      "runAfterFinish": true,
       "perMachine": false,
-      "include": "build/installer.nsh"
+      "include": "build/subscription-installer.nsh"
     }
   }
 }

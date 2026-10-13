@@ -86,9 +86,25 @@
 
 Var /GLOBAL PCU_DPAPI_PROVISION_RESULT
 
+# Snapshot of the caller-supplied TARGET_DIR, taken ONCE at macro entry,
+# before any register is touched. The macro's System::Store s/l only
+# preserves registers ACROSS the macro boundary; the macro itself DOES
+# clobber $R7 mid-flight (CryptAcquireContextA's BOOL return lands in it),
+# and NSIS instructions expand register references inside a parameter
+# string AT RUNTIME. A path like "$R7\personal-computer-use" passed by
+# build/installer.nsh (customInstall reads %APPDATA% into $R7) therefore
+# resolves to "1\personal-computer-use\..." once the SHA-256 section has
+# overwritten $R7 - FileOpen/Rename then fail silently and provisioning
+# reports "fail" while DPAPI itself succeeded. Freezing the expanded path
+# into this dedicated global var at entry removes that dependency.
+Var /GLOBAL PCU_DPAPI_PROVISION_TARGET
+
 !macro PCU_DPAPI_PROVISION_TO TARGET_DIR KEY KEY_VERSION
   System::Store "s"                       # save $0-$9 and $R0-$R9
   StrCpy $PCU_DPAPI_PROVISION_RESULT "fail"
+  # Freeze the caller's path (and registers) BEFORE the macro clobbers
+  # anything; every file instruction below uses this var.
+  StrCpy $PCU_DPAPI_PROVISION_TARGET "${TARGET_DIR}"
   StrCpy $R3 0
   StrCpy $R4 0
 
@@ -137,8 +153,8 @@ Var /GLOBAL PCU_DPAPI_PROVISION_RESULT
       StrCpy $R5 0
       StrCpy $R6 0
       ${If} $R8 != 0
-        CreateDirectory "${TARGET_DIR}"
-        ${If} ${FileExists} "${TARGET_DIR}"
+        CreateDirectory "$PCU_DPAPI_PROVISION_TARGET"
+        ${If} ${FileExists} "$PCU_DPAPI_PROVISION_TARGET"
           # SHA-256 of the raw DPAPI output bytes (what the base64 decodes
           # back to), hex-lowercase like Python hashlib.hexdigest, into $2.
           StrCpy $2 ""
@@ -206,7 +222,7 @@ Var /GLOBAL PCU_DPAPI_PROVISION_RESULT
                     # which is not reliable through the System plugin).
                     System::Call 'Kernel32::lstrlenA(p R2) i .R6'
                     ${If} $R6 > 0
-                      FileOpen $R0 "${TARGET_DIR}\provision.json.tmp" w
+                      FileOpen $R0 "$PCU_DPAPI_PROVISION_TARGET\provision.json.tmp" w
                       ${If} $R0 != ""
                         ClearErrors
                         FileWrite $R0 `{"schema":1,"keyVersion":${KEY_VERSION},"blob":"`
@@ -220,23 +236,23 @@ Var /GLOBAL PCU_DPAPI_PROVISION_RESULT
                         FileWrite $R0 `","blob_sha256":"$2"}`
                         FileClose $R0
                         ${IfNot} ${Errors}
-                        ${AndIf} ${FileExists} "${TARGET_DIR}\provision.json.tmp"
+                        ${AndIf} ${FileExists} "$PCU_DPAPI_PROVISION_TARGET\provision.json.tmp"
                           # Commit: ONE rename is the whole atomic step. A
                           # stray DIRECTORY holding the final name must
                           # count as failure (Delete cannot remove it and
                           # the Rename into it fails; the read-open below
                           # verifies the file).
-                          Delete "${TARGET_DIR}\provision.json"
-                          Rename "${TARGET_DIR}\provision.json.tmp" "${TARGET_DIR}\provision.json"
-                          FileOpen $R0 "${TARGET_DIR}\provision.json" r
+                          Delete "$PCU_DPAPI_PROVISION_TARGET\provision.json"
+                          Rename "$PCU_DPAPI_PROVISION_TARGET\provision.json.tmp" "$PCU_DPAPI_PROVISION_TARGET\provision.json"
+                          FileOpen $R0 "$PCU_DPAPI_PROVISION_TARGET\provision.json" r
                           ${If} $R0 != ""
                             FileClose $R0
                             StrCpy $PCU_DPAPI_PROVISION_RESULT "ok"
                             # Upgrade cleanup: remove the legacy two-file
                             # artifacts of older installers so no old mixed
                             # pair can linger next to the new envelope.
-                            Delete "${TARGET_DIR}\provision.blob"
-                            Delete "${TARGET_DIR}\provision.meta.json"
+                            Delete "$PCU_DPAPI_PROVISION_TARGET\provision.blob"
+                            Delete "$PCU_DPAPI_PROVISION_TARGET\provision.meta.json"
                           ${EndIf}
                         ${EndIf}
                       ${EndIf}
@@ -261,9 +277,9 @@ Var /GLOBAL PCU_DPAPI_PROVISION_RESULT
   # names are swept too (temps are never authoritative). Final files written
   # by a FAILED attempt do not exist (the commit rename never ran), so when
   # this macro returns with "fail" nothing it wrote remains on disk.
-  Delete "${TARGET_DIR}\provision.json.tmp"
-  Delete "${TARGET_DIR}\provision.blob.tmp"
-  Delete "${TARGET_DIR}\provision.meta.json.tmp"
+  Delete "$PCU_DPAPI_PROVISION_TARGET\provision.json.tmp"
+  Delete "$PCU_DPAPI_PROVISION_TARGET\provision.blob.tmp"
+  Delete "$PCU_DPAPI_PROVISION_TARGET\provision.meta.json.tmp"
 
   System::Store "l"                       # restore $0-$9 and $R0-$R9
 !macroend

@@ -1,0 +1,62 @@
+{
+  "date": "2026-10-13",
+  "version": "1.1.1",
+  "scope": "Input, confirmation, focus, completion, accessibility, instruction submission and subscription image integration audit",
+  "requested_distribution": {
+    "requirements": ["Owner's ChatGPT subscription", "No recipient sign-in", "No dependence on owner's PC"],
+    "achieved": false,
+    "reason": "No supported redistributable personal-subscription credential was established. No account session was exported or bundled. The available subscription build still requires an eligible ChatGPT sign-in on the destination computer.",
+    "pc_relay_deployed": false,
+    "cloud_service_deployed": false
+  },
+  "fixes": [
+    "Optional heuristic confirmations default off in backend, Electron and Settings",
+    "Status card is non-focusable and uses showInactive to preserve target focus",
+    "Status card hides if it overlaps an upcoming click; positioned above Windows notification area",
+    "Checked Win32 SendInput down/up pairs surface blocked clicks instead of swallowing input failures",
+    "Unicode typing including supplementary characters; Stop checked between characters and after pointer movement",
+    "UIA actual value/text patterns replace invalid property lookup and field-label verification",
+    "UIA search timeout corrected from 1000 seconds to 1 second",
+    "Unverified type plus done in one response requires another observation",
+    "Rejected confirmation stops the task; non-boolean protocol approvals are ignored",
+    "Instruction bar receives backend task states and keeps instructions when submission fails",
+    "64-bit native cursor handle declarations corrected; cursor is hidden only when overlay is enabled"
+  ],
+  "tests": {
+    "python_regression": {"passed": 110, "failed": 0},
+    "javascript_ipc_trust": "28 checks passed",
+    "javascript_secrets_filter": "passed",
+    "javascript_runtime_audit": "passed: production status window functions and instruction renderer exercised with mocked Electron/DOM",
+    "javascript_syntax": "passed",
+    "live_subscription_image_schema": "passed using gpt-6-luna and Codex CLI 0.159.2",
+    "live_screenshot_only_vision": "passed: randomized target location and fresh random-code OCR, no accessibility tree or answer in prompt",
+    "live_native_process_cancellation": "passed; child process exited and temporary screenshot directory removed",
+    "live_gated_app": {"passed": true, "confirmations": 1, "button_clicks": 1, "unicode_text_exact": true, "seconds": 83.0, "approval": "Native click on real Electron Approve button"},
+    "live_packaged_default_app": {"passed": true, "confirmations": 0, "button_clicks": 1, "unicode_text_exact": true, "seconds": 26.3},
+    "independent_verification": "Fixture recorded actual input/click events; native screenshot and accessibility readback also confirmed click count and Luna café Ω 🙂",
+    "live_stop_button": "Stopped the harmless pending confirmation through the real status card",
+    "package_source_match": "Frontend and changed backend files match source; no auth/config/seed files in app.asar",
+    "build": "passed"
+  },
+  "artifact": {
+    "path": "electron/dist/Personal Computer Use Setup 1.1.1.exe",
+    "bytes": 178204315,
+    "sha256": "0a24f8e20fd28cc042583e89398d0852b3404bcb3395347cbc5f58cc156317d2",
+    "requires_chatgpt_sign_in": true,
+    "contains_shared_subscription_credentials": false
+  },
+  "limitations": [
+    "Live runs reused the owner's existing sign-in on this PC; they do not prove the requested sign-in-free independent distribution.",
+    "Fresh VM installation, recipient authentication and arbitrary third-party workflows were not tested.",
+    "Screenshot vision was tested; no separate natural-photo classification benchmark was run.",
+    "Early test harness attempts were corrected for UTF-8 file reading, replayed task IDs and an interim-summary expectation. A Windows notification obstructed the first approval attempt; the status card was relocated before the successful complete run.",
+    "A concurrent build initially hit a Windows executable lock while live Codex inference was running; the final build succeeded after inference finished.",
+    "Pre-existing changes were preserved. git diff --check still reports the pre-existing trailing blank line in electron/build/provision-macro.nsh.",
+    "The existing installed older app and its configuration were not replaced; test apps ran in an isolated configuration directory and were closed."
+  ],
+  "sources": [
+    "https://learn.chatgpt.com/docs/auth",
+    "https://learn.chatgpt.com/docs/non-interactive-mode",
+    "https://developers.openai.com/api/docs/models/gpt-6-luna"
+  ]
+}

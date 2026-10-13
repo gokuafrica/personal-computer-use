@@ -19,6 +19,7 @@ const path = require('path');
 const WebSocket = require('ws');
 const { createSecretsFilter } = require('./secrets-filter');
 const { trustedRendererPath } = require('./ipc-trust');
+const { createSubscriptionSetup } = require('./subscription-setup');
 
 const ROOT = path.join(__dirname, '..');
 const BACKEND_URL = 'ws://127.0.0.1:8765';
@@ -37,10 +38,11 @@ if (PCU_CONFIG_DIR_OVERRIDE) {
 const PCU_AUTO_QUIT_MS = parseInt(process.env.PCU_AUTO_QUIT_MS || '', 10) || 0;
 
 const DEFAULT_CONFIG = {
-  provider: 'openai',
+  provider: 'codex',
+  codex: { model: 'gpt-6-luna', reasoning_effort: 'high' },
   openai: { model: 'computer-use-preview' },
   anthropic: { model: 'claude-3-7-sonnet-latest' },
-  openai_compat: { base_url: '', model: '' },
+  openai_compat: { base_url: 'https://opencode.ai/zen/go/v1', model: 'glm-5.3-flash' },
   apiKeyEncrypted: null,
   keySource: 'none',
   keyVersion: 0,
@@ -48,7 +50,8 @@ const DEFAULT_CONFIG = {
   max_steps: 40,
   action_delay_s: 0.4,
   pointer_glide_s: 0.45,
-  cursor_overlay: true
+  cursor_overlay: true,
+  confirm_actions: false
 };
 
 // ---------- config location ----------
@@ -230,6 +233,7 @@ function showNotification(title, body) {
 
 function backendEnv() {
   const env = { ...process.env, PCU_CONFIG_DIR: configDirPath() };
+  if (app.isPackaged) env.PCU_CODEX_EXECUTABLE = path.join(process.resourcesPath, 'codex-runtime', 'codex.exe');
   // An explicitly provided PCU_TRAJECTORY_DIR wins (isolated validation hook).
   // Packaged default is local app data (not Documents, which may be OneDrive-synced
   // and would upload screenshots to cloud): %LOCALAPPDATA%\PCU\trajectories.
@@ -504,6 +508,15 @@ function convertActionPoint(msg) {
 
 function handleBackendMessage(msg) {
   if (!msg || typeof msg.type !== 'string') return;
+  // Keep our own card out of the way of a desktop click. Coordinates here
+  // are physical pixels; convertActionPoint below makes them overlay-relative.
+  if (msg.type === 'action' && Number.isFinite(msg.x) && Number.isFinite(msg.y) &&
+      statusWin && !statusWin.isDestroyed() && statusWin.isVisible()) {
+    const point = screen.screenToDipPoint({ x: Math.round(msg.x), y: Math.round(msg.y) });
+    const bounds = statusWin.getBounds();
+    if (point.x >= bounds.x && point.x < bounds.x + bounds.width &&
+        point.y >= bounds.y && point.y < bounds.y + bounds.height) statusWin.hide();
+  }
   if (msg.type === 'action') convertActionPoint(msg);
   if (msg.type === 'key_op_result') resolveKeyOp(msg);
   if (statusWin && !statusWin.isDestroyed()) {
@@ -511,6 +524,9 @@ function handleBackendMessage(msg) {
   }
   if (overlayWin && !overlayWin.isDestroyed()) {
     overlayWin.webContents.send('backend-message', msg);
+  }
+  if (barWin && !barWin.isDestroyed()) {
+    barWin.webContents.send('backend-message', msg);
   }
   switch (msg.type) {
     case 'need_confirmation':
@@ -548,6 +564,7 @@ function createStatusWindow() {
     width: 420,
     height: 340,
     show: false,
+    focusable: false,
     frame: false,
     alwaysOnTop: true,
     skipTaskbar: true,
@@ -572,7 +589,7 @@ function positionStatusCard() {
   const { workArea } = screen.getPrimaryDisplay();
   statusWin.setPosition(
     workArea.x + workArea.width - 420 - 16,
-    workArea.y + workArea.height - 340 - 16
+    workArea.y + 16 // Keep approval controls above Windows notification toasts.
   );
 }
 
@@ -580,7 +597,7 @@ function showStatusCard() {
   clearTimeout(hideStatusTimer);
   if (!statusWin || statusWin.isDestroyed()) createStatusWindow();
   positionStatusCard();
-  statusWin.show();
+  statusWin.showInactive();
 }
 
 // ---------- instruction bar ----------
@@ -724,6 +741,7 @@ function hideOverlay() {
 
 function createSettingsWindow() {
   if (settingsWin && !settingsWin.isDestroyed()) {
+    settingsWin.show();
     settingsWin.focus();
     return;
   }
@@ -817,6 +835,7 @@ function assertTrustedSender(event) {
 function configSummary() {
   return {
     provider: config.provider,
+    codex: { model: config.codex.model, reasoning_effort: config.codex.reasoning_effort },
     openai: { model: config.openai.model },
     anthropic: { model: config.anthropic.model },
     openai_compat: {
@@ -827,6 +846,7 @@ function configSummary() {
     action_delay_s: config.action_delay_s,
     pointer_glide_s: config.pointer_glide_s,
     cursor_overlay: config.cursor_overlay,
+    confirm_actions: config.confirm_actions === true,
     keyConfigured: Boolean(config.apiKeyEncrypted || extractLegacyKey(config)),
     keySource: config.keySource || 'none',
     keyVersion: typeof config.keyVersion === 'number' ? config.keyVersion : 0,
@@ -843,6 +863,11 @@ function pickEditableConfig(cfg) {
   const out = {};
   if (!cfg || typeof cfg !== 'object') return out;
   if (typeof cfg.provider === 'string') out.provider = cfg.provider;
+  if (cfg.codex && typeof cfg.codex === 'object') {
+    out.codex = {};
+    if (typeof cfg.codex.model === 'string') out.codex.model = cfg.codex.model;
+    if (['low', 'medium', 'high'].includes(cfg.codex.reasoning_effort)) out.codex.reasoning_effort = cfg.codex.reasoning_effort;
+  }
   if (cfg.openai && typeof cfg.openai === 'object' &&
       typeof cfg.openai.model === 'string') out.openai = { model: cfg.openai.model };
   if (cfg.anthropic && typeof cfg.anthropic === 'object' &&
@@ -860,12 +885,69 @@ function pickEditableConfig(cfg) {
     out.pointer_glide_s = cfg.pointer_glide_s;
   }
   if (typeof cfg.cursor_overlay === 'boolean') out.cursor_overlay = cfg.cursor_overlay;
+  if (typeof cfg.confirm_actions === 'boolean') out.confirm_actions = cfg.confirm_actions;
   return out;
 }
 
 ipcMain.handle('get-config-summary', (e) => {
   assertTrustedSender(e);
   return configSummary();
+});
+
+// The renderer receives only status. Codex owns all OAuth credentials.
+const codexAuthChildren = new Set();
+function runCodexCommand(args) {
+  const runtimeRoot = app.isPackaged ? process.resourcesPath : __dirname;
+  const executable = process.env.PCU_CODEX_EXECUTABLE || path.join(runtimeRoot, 'codex-runtime', 'codex.exe');
+  const env = { ...process.env };
+  delete env.OPENAI_API_KEY;
+  delete env.CODEX_API_KEY;
+  delete env.OPENAI_BASE_URL;
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      cwd: runtimeRoot, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
+    });
+    codexAuthChildren.add(child);
+    let output = '';
+    const capture = (data) => {
+      // Login URLs/codes are not needed by the renderer or logs.
+      if (args.includes('status')) output = (output + data.toString()).slice(-4096);
+    };
+    child.stdout.on('data', capture);
+    child.stderr.on('data', capture);
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; child.kill(); }, args.includes('status') ? 15000 : 300000);
+    child.on('error', () => reject(new Error('Could not start ChatGPT sign-in.')));
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      codexAuthChildren.delete(child);
+      resolve({ code, output, timedOut });
+    });
+  });
+}
+async function runCodexAuth(mode) {
+  if (quitting) throw new Error('App is closing.');
+  if (mode === 'login') await runCodexCommand(['login']);
+  if (quitting) throw new Error('App is closing.');
+  const result = await runCodexCommand(['login', 'status']);
+  if (result.timedOut) throw new Error('Sign-in check timed out.');
+  const signedIn = result.code === 0 && result.output.includes('ChatGPT');
+  return { available: true, signedIn, message: signedIn ? 'Signed in with ChatGPT' : 'Sign in with ChatGPT to use your subscription.' };
+}
+const subscriptionSetup = createSubscriptionSetup({
+  check: () => runCodexAuth('status'),
+  login: () => runCodexAuth('login'),
+  onState: (state) => {
+    if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send('codex-auth-state', state);
+  }
+});
+ipcMain.handle('codex-status', (e) => {
+  assertTrustedSender(e);
+  return subscriptionSetup.status();
+});
+ipcMain.handle('codex-login', (e) => {
+  assertTrustedSender(e);
+  return subscriptionSetup.signIn();
 });
 
 ipcMain.handle('save-config', (e, cfg) => {
@@ -949,7 +1031,8 @@ ipcMain.handle('stop-task', (e) => {
 
 ipcMain.handle('confirm', (e, id, approved) => {
   assertTrustedSender(e);
-  sendWs({ type: 'confirm', id: String(id || ''), approved: Boolean(approved) });
+  if (typeof approved !== 'boolean') return false;
+  return sendWs({ type: 'confirm', id: String(id || ''), approved });
 });
 
 ipcMain.on('hide-bar', (e) => {
@@ -961,9 +1044,13 @@ ipcMain.on('hide-bar', (e) => {
 
 app.setAppUserModelId('com.personal-computer-use.app');
 
-app.on('second-instance', showBar);
+app.on('second-instance', (_event, argv) => {
+  if (argv.includes('--settings')) createSettingsWindow();
+  else showBar();
+});
 
 app.whenReady().then(() => {
+  const firstRun = !fs.existsSync(configPath());
   provisionConfig();
   readConfig();
   // The stored credential blob is produced/owned by the backend (raw DPAPI)
@@ -983,6 +1070,14 @@ app.whenReady().then(() => {
   applyHotkey();
   spawnBackend();
   connectWs();
+  if (firstRun || process.argv.includes('--settings')) createSettingsWindow();
+  if (config.provider === 'codex') {
+    // A cancelled first attempt remains recoverable on the next launch.
+    // Existing ChatGPT sessions are reused without opening the browser.
+    void subscriptionSetup.ensure(() => {
+      if (!quitting) createSettingsWindow();
+    });
+  }
   if (PCU_AUTO_QUIT_MS > 0) {
     setTimeout(() => app.quit(), PCU_AUTO_QUIT_MS);
   }
@@ -994,6 +1089,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   quitting = true;
+  for (const child of codexAuthChildren) child.kill();
   clearTimeout(wsRetryTimer);
   clearTimeout(hideStatusTimer);
   clearTimeout(overlayHideTimer);

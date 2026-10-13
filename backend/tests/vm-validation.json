@@ -1,0 +1,228 @@
+{
+  "date": "2026-10-13",
+  "release": "1.1.3",
+  "assessment": "Version 1.1.3 installed application, fresh user-completed browser sign-in, live model operation and login persistence validated. Release 1.1.4 changes only reasoning defaults to high and version metadata; tests were not rerun for that change at user request.",
+  "installer": {
+    "path": "electron/dist/Personal Computer Use Setup 1.1.3.exe",
+    "bytes": 178205425,
+    "sha256": "982897948485E7D327EADD767A0A12F58D97D395AA5FB2984F23BA108663FFBA",
+    "signed": false,
+    "build": "npm run dist -- --publish never completed successfully",
+    "ownerCredentialsBundled": false
+  },
+  "environment": {
+    "skill": "vm-test-baseline",
+    "source": "Win11CleanBase",
+    "sourceUuid": "b1837637-cc74-4326-88a0-122fd9d61872",
+    "snapshot": "clean-before-app",
+    "snapshotUuid": "1b7f2b0d-148c-4b2b-aa35-79203a03f951",
+    "guest": "Windows 11 Home 25H2, non-administrator test account",
+    "access": "VirtualBox Guest Additions guestcontrol plus native Windows sky control of the visible VM",
+    "cloneType": "linked",
+    "verifiedParentDiskUuid": "e8f2296a-90c7-43d3-a7cd-5d61876f183c",
+    "clones": [
+      "PCU-VMTest-20261013-161836",
+      "PCU-VMTest-20261013-Regression",
+      "PCU-VMTest-20261013-Interactive",
+      "PCU-VMTest-20261013-Final",
+      "PCU-VMTest-20261013-113"
+    ],
+    "runtimes": {
+      "python": "3.12.10",
+      "electron": "33.4.11",
+      "codex": "0.159.2"
+    }
+  },
+  "fix": {
+    "finding": "Cold SDK import and client construction blocked the backend event loop, producing a WebSocket heartbeat timeout on a constrained VM.",
+    "change": "Initialize OpenAI, OpenAI-compatible and Anthropic SDK clients with asyncio.to_thread so heartbeats and cancellation remain responsive.",
+    "regressionTests": "backend/tests/test_provider_startup.py adds three asynchronous slow-start cancellation tests."
+  },
+  "results": {
+    "backend": {
+      "hostPassed": 113,
+      "installedVmPassed": 113,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "installedJavascriptSuitesPassed": [
+      "ipc_trust_test.mjs",
+      "secrets_filter_test.mjs",
+      "runtime-audit-test.mjs",
+      "subscription-setup-test.mjs"
+    ],
+    "desktop": {
+      "model": "loopback simulated VLM",
+      "realComponents": "Installed frontend/backend, screenshot capture, Win32 mouse/Unicode input, WinForms target",
+      "passed": 12,
+      "cases": [
+        "normal",
+        "gated",
+        "decline",
+        "stopgate",
+        "stopclick",
+        "stoptype",
+        "pixel",
+        "http401",
+        "invalid",
+        "limit",
+        "slow",
+        "recovery"
+      ],
+      "coldTaskSeconds": 53.22,
+      "warmNormalTaskSeconds": 4.69,
+      "stopLatencySecondsRange": [
+        0.01,
+        0.41
+      ],
+      "notes": "Default operation showed no approval requests. Rejection and stopping pending clicks caused no target click; interrupted typing stopped growing."
+    },
+    "liveModel": {
+      "model": "gpt-6-luna",
+      "authentication": "Temporary reuse of the owner's existing Codex session in one disposable VM, never staged in the installer or repository",
+      "passed": [
+        "Subscription-backed installed Codex provider with image input, structured output and UI element grounding",
+        "Screenshot-only random-code OCR and randomly positioned target coordinates, without UIA or answer hints",
+        "Native Codex cancellation stops its process and removes the temporary image",
+        "Default real desktop run: exactly one click and exact Unicode text Luna café Ω 🙂; no approvals; 23.8 seconds",
+        "Gated real desktop retry: actual Approve button clicked through native sky, exactly one target click and exact Unicode text, final model verification; 87.0 seconds"
+      ],
+      "failureRetained": "First gated live run clicked and typed correctly, but its final model verification failed with a provider error after 81.6 seconds. A subsequent small model probe and complete gated retry passed. This was not a zero-error live test run."
+    },
+    "lifecyclePassed": [
+      "Reject missing and wrong runtime tokens with HTTP 401",
+      "Reject foreign origin with HTTP 403",
+      "Recover after malformed WebSocket input",
+      "Single instance enforcement",
+      "Restart backend once after crash and rotate runtime token",
+      "Do not loop after a second backend crash",
+      "Clean quit removes backend and runtime token",
+      "Normal restart after crash"
+    ],
+    "installer": {
+      "fresh113": "Exit 0, installed version 1.1.3.0 and installer hash verified",
+      "upgrade111To112": "Exit 0; provider, hotkey, approval preference and step limit retained",
+      "upgrade112To113WhileRunning": "Application processes closed automatically. Guest command wrapper timed out, so installer exit code was not captured. Installation subsequently completed; installed version and app.asar, Codex, Python and changed provider hashes matched the release. All live tests then ran the installed 1.1.3 application.",
+      "firstLaunch": "Browser opened automatically on a fresh VM. User completed Edge onboarding and ChatGPT browser sign-in; installed app displayed Signed in. Installed Codex confirmed login, live image and desktop checks passed, and the login persisted through application restart.",
+      "uninstall113": "Exit 0; application, resources, shortcuts, runtime token and processes removed. Default preferences did not exist in this clone because tests used override configuration directories; its false userPreferencesRetained result is not evidence of deleting existing preferences.",
+      "artifactAudit": "Packaged JavaScript matches source; no auth.json, default-config.json, provision.json, .env or runtime_token found in scanned packaged resources."
+    }
+  },
+  "earlierTrials": [
+    "1.1.2 passed 110 installed backend tests and four JavaScript suites.",
+    "Initial interaction harness runs encountered foreground focus and startup timing errors. Persistent fixture reset replaced repeated window recreation; failures were retained as harness evidence.",
+    "A later 1.1.2 clone passed 11/12 desktop cases; its cold startup heartbeat failure led to the 1.1.3 fix. The full 12-case suite passed on a fresh 1.1.3 clone.",
+    "One gated retry initially consumed a replayed last-task status because a task ID was reused. The harness now uses UUID task IDs and stops any previous dedicated test task before starting. This harness failure is separate from the recorded live provider error."
+  ],
+  "limitations": [
+    "One transient live provider error occurred; successful retry does not establish broad service reliability.",
+    "Cold startup took 53 seconds in the 4 GB VM; no performance guarantee is implied.",
+    "No Windows 10, multi-monitor, elevated target application or broad arbitrary-photo benchmark was performed.",
+    "Unsigned installer was copied into the VM; browser-download SmartScreen/Mark-of-the-Web behavior was not tested.",
+    "The 1.1.4 high-effort default was applied after the successful 1.1.3 low-effort VM tests. No tests were rerun after this configuration change, as explicitly requested by the user."
+  ],
+  "cleanup": {
+    "allFiveClonesUnregistered": true,
+    "allFiveCloneDirectoriesAndDisksRemoved": true,
+    "guestAuthenticationCacheRemovedWithClone": true,
+    "ownerHostStillSignedIn": true,
+    "sourceNeverStarted": true,
+    "sourcePoweredOffAfterwards": true,
+    "sourceConfigurationSha256BeforeAndAfter": "A8723FA27A3677F9D557AF7A56CAD9F306F45ECC306FCD294E2037ED44C5FA3F",
+    "sourceMachineReadableInfoUnchanged": true,
+    "sourceBaseAndSnapshotDiskSizesAndModificationTimesUnchanged": true,
+    "sourceCleanSnapshotStillRegistered": true,
+    "filesOrServicesLeftInClones": "None; all clones deleted",
+    "hostArtifactsRetained": "Release installer, opt-in regression harness and local validation evidence"
+  },
+  "evidenceDirectory": "dist/vm-validation-20261013-161836",
+  "evidenceFiles": [
+    "release113-install-113.json",
+    "release113-python-tests.json",
+    "release113-javascript-tests.json",
+    "release113-interactions.json",
+    "release113-lifecycle.json",
+    "release113-uninstall.json",
+    "upgrade113-hashes.json",
+    "live-vision.json",
+    "live-desktop-first.json",
+    "model-probe.json",
+    "live-desktop.json",
+    "cleanup-all.json",
+    "source-before.txt",
+    "source-after.txt",
+    "source-config-hash-before.json",
+    "source-disks-before.json",
+    "source-disks-after.json"
+  ],
+  "freshBrowserSignInValidation": {
+    "clone": "PCU-VMTest-20261013-SignIn",
+    "cloneUuid": "5dddbf9c-3070-4804-a574-8e76bcffa706",
+    "cloneType": "linked",
+    "source": "Win11CleanBase",
+    "snapshot": "clean-before-app",
+    "access": "VirtualBox guestcontrol and native sky inspection; user completed authentication",
+    "evidenceDirectory": "dist/vm-signin-20261013",
+    "preflight": {
+      "appConfigPresent": false,
+      "ownerAuthPresent": false
+    },
+    "install": {
+      "exitCode": 0,
+      "installerHash": "982897948485E7D327EADD767A0A12F58D97D395AA5FB2984F23BA108663FFBA",
+      "version": "1.1.3.0"
+    },
+    "vision": {
+      "installedVersion": "1.1.3",
+      "model": "gpt-6-luna",
+      "installedProvider": true,
+      "authentication": "fresh browser sign-in completed by user in disposable VM",
+      "pass": true,
+      "seconds": 16.9,
+      "checks": [
+        "PASS subscription + gpt-6-luna + image + schema + UI grounding (5.2s)",
+        "[{'kind': 'click_element', 'id': 7}]",
+        "PASS screenshot-only vision: fresh random-code OCR and target coordinates, no UIA",
+        "PASS live cancellation: native process stopped and temporary image removed"
+      ]
+    },
+    "desktop": {
+      "case": "default",
+      "success": true,
+      "actual": {
+        "text": "Luna café Ω 🙂",
+        "clicks": 1
+      },
+      "confirmations": 0,
+      "seconds": 28.2
+    },
+    "restart": {
+      "appRunning": true,
+      "pendingBrowserLogins": 0,
+      "signedInBeforeRestart": true,
+      "signedInAfterRestart": true
+    },
+    "cleanup": {
+      "clone": "PCU-VMTest-20261013-SignIn",
+      "sourcePoweredOff": true,
+      "sourceConfigHashUnchanged": true,
+      "guestLoggedOut": true,
+      "sourceInfoUnchanged": true,
+      "directoryRemoved": true
+    },
+    "harnessNote": "Initial restart harness incorrectly treated Codex status text on stderr as a terminating PowerShell error. Redirected native output to files and reran successfully; this was a harness issue."
+  },
+  "distributedRelease": {
+    "version": "1.1.4",
+    "path": "electron/dist/Personal Computer Use Setup 1.1.4.exe",
+    "bytes": 178205463,
+    "sha256": "99EEDCBF351548581E1C741386B802E13B9D769A787FDCC5C9A74BCEA8C0E62B",
+    "model": "gpt-6-luna",
+    "defaultReasoningEffort": "high",
+    "buildSucceeded": true,
+    "testsRerun": false,
+    "reason": "User explicitly requested only the default configuration change and rebuild after completing the 1.1.3 tests.",
+    "existingSavedEffortPreserved": true
+  }
+}

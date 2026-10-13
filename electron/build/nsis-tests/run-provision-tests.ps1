@@ -477,6 +477,61 @@ SectionEnd
   Assert ($dec11 -eq 'DECRYPT_OK') "T11 envelope decrypts to the synthetic key ($dec11)"
   Assert (-not (Test-Path (Join-Path $target11 'provision.json.tmp'))) 'T11 no .tmp leftover'
 
+  # ================= T12: register-backed target path =================
+  # Regression for the production install failure: customInstall passes the
+  # target dir as "$R7\personal-computer-use" (APPDATA read into $R7). The
+  # macro's SHA-256 section clobbers $R7 (CryptAcquireContextA's BOOL return),
+  # and NSIS expands register references inside parameter strings at RUNTIME,
+  # so every file instruction after that point resolved to
+  # "1\personal-computer-use\..." - FileOpen/Rename failed while DPAPI itself
+  # succeeded, provisioning reported "fail", and the installer wrote the
+  # non-secret failure flag. The fix freezes the expanded path into
+  # PCU_DPAPI_PROVISION_TARGET at macro entry; T12 passes the path via a
+  # register (exactly like customInstall) in BOTH runtimes and requires "ok".
+  Write-Host 'T12 register-backed target path (production customInstall pattern), ANSI + Unicode'
+  foreach ($rt in @(@{ Name = 'T12a ANSI'; U = $false }, @{ Name = 'T12b Unicode'; U = $true })) {
+    $t12 = Join-Path $sandbox 't12'
+    if (-not (Test-Path $t12)) { New-Item -ItemType Directory $t12 | Out-Null }
+    $key12 = New-SyntheticKey
+    $parent12 = Join-Path $t12 'appdata-root'
+    New-Item -ItemType Directory $parent12 -Force | Out-Null
+    Copy-Item (Join-Path $sandbox 'provision-macro.nsh') (Join-Path $t12 'provision-macro.nsh') -Force
+    $v12 = @{
+      Key = $key12; Version = 7
+      Exe = (Join-Path $t12 "$($rt.Name -replace '\s', '-').exe")
+      Result = (Join-Path $t12 "$($rt.Name -replace '\s', '-').result")
+    }
+    $tpl12 = @'
+RequestExecutionLevel user
+SilentInstall silent
+__UNICODE__
+!define PCU_SEED_KEY "__KEY__"
+!define PCU_SEED_KEY_VERSION __VERSION__
+OutFile "__EXE__"
+!include "provision-macro.nsh"
+Section
+  StrCpy $R7 "__PARENT__"
+  !insertmacro PCU_DPAPI_PROVISION_TO "$R7\pcu" "${PCU_SEED_KEY}" "${PCU_SEED_KEY_VERSION}"
+  FileOpen $0 "__RESULT__" w
+  FileWrite $0 $PCU_DPAPI_PROVISION_RESULT
+  FileClose $0
+SectionEnd
+'@
+    $tpl12 = $tpl12.Replace('__UNICODE__', ($(if ($rt.U) { 'Unicode true' } else { '' })))
+    $tpl12 = $tpl12.Replace('__KEY__', $key12).Replace('__VERSION__', '7').Replace('__EXE__', $v12.Exe)
+    $tpl12 = $tpl12.Replace('__PARENT__', $parent12).Replace('__RESULT__', $v12.Result)
+    Set-Content -LiteralPath (Join-Path $t12 't12.nsi') -Value $tpl12 -Encoding UTF8
+    $c12 = Invoke-Makensis (Join-Path $t12 't12.nsi')
+    Assert ($c12.ExitCode -eq 0) "$($rt.Name) .nsi compiles (makensis exit 0)"
+    if ($c12.ExitCode -ne 0) { Write-Host $c12.Output }
+    $null = Invoke-TestExe $v12.Exe
+    Assert ((Read-Result $v12.Result) -eq 'ok') "$($rt.Name) register-backed path provisions ok"
+    Assert (Test-Path (Join-Path $parent12 'pcu\provision.json')) "$($rt.Name) envelope written at the register-built path"
+    $dec12 = Test-EnvelopeDecrypt (Join-Path $parent12 'pcu\provision.json') $key12
+    Assert ($dec12 -eq 'DECRYPT_OK') "$($rt.Name) envelope validates and decrypts to synthetic key ($dec12)"
+    Assert (-not (Test-Path (Join-Path $parent12 'pcu\provision.json.tmp'))) "$($rt.Name) no .tmp leftover"
+  }
+
   # ================= summary =================
   Write-Host ''
   Write-Host "SUMMARY: $($script:passCount) passed, $($script:failCount) failed"

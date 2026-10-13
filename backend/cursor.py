@@ -12,8 +12,16 @@ from __future__ import annotations
 import atexit
 
 import ctypes
+from ctypes import wintypes
 
 _user32 = ctypes.windll.user32
+_user32.CreateCursor.argtypes = (wintypes.HINSTANCE, ctypes.c_int, ctypes.c_int,
+                                ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+_user32.CreateCursor.restype = wintypes.HANDLE
+_user32.SetSystemCursor.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+_user32.SetSystemCursor.restype = wintypes.BOOL
+_user32.DestroyCursor.argtypes = (wintypes.HANDLE,)
+_user32.DestroyCursor.restype = wintypes.BOOL
 
 OCR_ARROW = 32512
 OCR_IBEAM = 32513
@@ -37,9 +45,13 @@ def hide_native_cursor() -> None:
     if _hidden:
         return
     for flag in (OCR_ARROW, OCR_IBEAM, OCR_HAND):
-        _user32.SetSystemCursor(_blank_cursor(), flag)
+        handle = _blank_cursor()
+        if not handle or not _user32.SetSystemCursor(handle, flag):
+            if handle:
+                _user32.DestroyCursor(handle)
+            restore_native_cursor()
+            return
     _hidden = True
-    atexit.register(restore_native_cursor)
 
 
 def restore_native_cursor() -> None:
@@ -47,3 +59,6 @@ def restore_native_cursor() -> None:
     global _hidden
     _user32.SystemParametersInfoW(SPI_SETCURSORS, 0, None, 0)
     _hidden = False
+
+
+atexit.register(restore_native_cursor)

@@ -399,7 +399,9 @@ class Backend:
 
     def handle_confirm(self, message: dict[str, Any]) -> None:
         confirm_id = str(message.get("id", ""))
-        approved = bool(message.get("approved", False))
+        if type(message.get("approved")) is not bool:
+            return
+        approved = message["approved"]
         if self.runner is None or not self.runner.resolve_confirm(confirm_id, approved):
             _safe_print(
                 f"[CUA] confirm ignored (no matching pending gate): {confirm_id}"

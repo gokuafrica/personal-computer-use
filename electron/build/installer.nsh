@@ -146,11 +146,14 @@
 # Secret-bearing user files are removed on uninstall even though
 # deleteAppDataOnUninstall is not enabled.
 !macro customUnInstall
-  # Reference the provisioning result var so the uninstaller-generation
+  # Reference the provisioning vars so the uninstaller-generation
   # makensis pass (BUILD_UNINSTALLER, where customInstall is never inserted)
   # does not warn 6001 "never referenced" - electron-builder treats warnings
-  # as errors. Harmless reset on a var the uninstall flow never reads.
+  # as errors. Harmless resets on vars the uninstall flow never reads
+  # (PCU_DPAPI_PROVISION_TARGET is the path snapshot taken by
+  # PCU_DPAPI_PROVISION_TO; see provision-macro.nsh).
   StrCpy $PCU_DPAPI_PROVISION_RESULT "uninstall"
+  StrCpy $PCU_DPAPI_PROVISION_TARGET ""
   ${if} $installMode == "all"
     SetShellVarContext current
   ${endif}

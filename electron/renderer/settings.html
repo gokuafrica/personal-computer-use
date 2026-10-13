@@ -11,10 +11,23 @@
 
     <label for="provider">Provider</label>
     <select id="provider">
+      <option value="codex">ChatGPT subscription (GPT-6 Luna)</option>
       <option value="openai">OpenAI</option>
       <option value="anthropic">Anthropic</option>
       <option value="openai_compat">OpenAI-compatible</option>
     </select>
+
+    <fieldset data-provider="codex">
+      <legend>ChatGPT subscription</legend>
+      <p id="codex-status" role="status" aria-live="polite">Checking sign-in…</p>
+      <button id="codex-login" type="button">Sign in with ChatGPT</button>
+      <button id="codex-refresh" type="button">Check sign-in</button>
+      <p class="hint">ChatGPT sign-in opens automatically when you first launch the app. Complete it in your browser, then return here. Your sign-in is remembered; no API key or extra setup is needed. Use an eligible ChatGPT plan. Subscription limits apply.</p>
+      <label for="codex-model">Model</label>
+      <input id="codex-model" type="text" value="gpt-6-luna" />
+      <label for="codex-effort">Reasoning</label>
+      <select id="codex-effort"><option value="low">Low (faster)</option><option value="medium">Medium</option><option value="high" selected>High</option></select>
+    </fieldset>
 
     <fieldset id="api-key-fieldset">
       <legend>API key</legend>
@@ -58,6 +71,12 @@
       <input id="cursor-overlay" type="checkbox" />
       Show agent cursor overlay while a task runs
     </label>
+
+    <label class="check-row" for="confirm-actions">
+      <input id="confirm-actions" type="checkbox" />
+      Ask before potentially sensitive actions
+    </label>
+    <p class="hint">Off by default. Tasks act on your instructions without extra confirmation. Stop and the mouse-corner emergency stop remain available.</p>
 
     <div id="buttons">
       <button id="save" class="primary">Save</button>

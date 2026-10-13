@@ -12,6 +12,7 @@ carrying tool_result blocks with the next screenshot.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from .. import secrets_filter
@@ -74,13 +75,17 @@ class AnthropicProvider:
         self.model = section.get("model") or DEFAULT_MODEL
         self.tool_version = section.get("tool_version") or DEFAULT_TOOL_VERSION
         self.beta = section.get("beta") or DEFAULT_BETA
+        # Key from the config section (runtime-materialized into the ACTIVE
+        # provider section, memory only). Empty falls back to the
+        # ANTHROPIC_API_KEY env var inside AsyncAnthropic.
+        self.api_key = (section.get("api_key") or "").strip() or None
         self._client = None
 
     def _get_client(self) -> Any:
         if self._client is None:
             from anthropic import AsyncAnthropic
 
-            self._client = AsyncAnthropic()
+            self._client = AsyncAnthropic(api_key=self.api_key)
         return self._client
 
     def _tool(self, width: int, height: int) -> dict[str, Any]:
@@ -105,7 +110,7 @@ class AnthropicProvider:
             print(secrets_filter.filter_text(
                 "[anthropic] a11y_context present but ignored (pixel-space protocol)"),
                 flush=True)
-        client = self._get_client()
+        client = await asyncio.to_thread(self._get_client)
         messages: list[dict[str, Any]] = [dict(m) for m in history] if history else []
         if not messages:
             messages.append({

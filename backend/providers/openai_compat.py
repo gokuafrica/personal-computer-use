@@ -36,6 +36,7 @@ suitable element is listed.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -239,7 +240,9 @@ class OpenAICompatProvider:
         history: Any,
         a11y_context: dict[str, Any] | None = None,
     ) -> StepResult:
-        client = self._get_client()
+        # SDK imports and construction can take seconds on a clean Windows
+        # installation. Keep heartbeats and Stop responsive during startup.
+        client = await asyncio.to_thread(self._get_client)
         if not self.model:
             raise ValueError("openai_compat.model is not configured")
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]

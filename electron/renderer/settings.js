@@ -2,6 +2,7 @@
 
 const providerSel = document.getElementById('provider');
 const fields = {
+  codex: { model: document.getElementById('codex-model'), effort: document.getElementById('codex-effort') },
   openai: {
     model: document.getElementById('openai-model')
   },
@@ -21,6 +22,7 @@ const hotkeyInput = document.getElementById('hotkey');
 const delayInput = document.getElementById('action-delay');
 const glideInput = document.getElementById('pointer-glide');
 const overlayToggle = document.getElementById('cursor-overlay');
+const confirmToggle = document.getElementById('confirm-actions');
 const toast = document.getElementById('toast');
 const errorBox = document.getElementById('error');
 
@@ -31,8 +33,10 @@ const SOURCE_LABELS = {
 };
 
 function refreshFieldsets() {
+  document.getElementById('api-key-fieldset').classList.toggle('hidden', providerSel.value === 'codex');
   document.querySelectorAll('fieldset[data-provider]').forEach((fs) => {
     fs.classList.toggle('active', fs.dataset.provider === providerSel.value);
+    fs.classList.toggle('hidden', fs.dataset.provider !== providerSel.value);
   });
 }
 
@@ -65,7 +69,9 @@ function applyEncryptionState(summary) {
 }
 
 function fill(summary) {
-  providerSel.value = summary.provider || 'openai';
+  providerSel.value = summary.provider || 'codex';
+  fields.codex.model.value = summary.codex?.model || 'gpt-6-luna';
+  fields.codex.effort.value = summary.codex?.reasoning_effort || 'high';
   fields.openai.model.value = summary.openai?.model || '';
   fields.anthropic.model.value = summary.anthropic?.model || '';
   fields.openai_compat.url.value = summary.openai_compat?.base_url || '';
@@ -78,6 +84,7 @@ function fill(summary) {
     ? summary.pointer_glide_s
     : 0.45;
   overlayToggle.checked = summary.cursor_overlay !== false;
+  confirmToggle.checked = summary.confirm_actions === true;
   keyStatus.textContent = describeKey(summary);
   clearKeyBtn.classList.toggle('hidden', !(summary.keyConfigured && summary.keySource === 'user'));
   newKeyInput.value = '';
@@ -88,6 +95,7 @@ function fill(summary) {
 function collect() {
   return {
     provider: providerSel.value,
+    codex: { model: fields.codex.model.value.trim() || 'gpt-6-luna', reasoning_effort: fields.codex.effort.value },
     openai: {
       model: fields.openai.model.value.trim()
     },
@@ -109,7 +117,8 @@ function collect() {
       if (!isFinite(n)) return 0.45;
       return Math.min(1, Math.max(0, n));
     })(),
-    cursor_overlay: overlayToggle.checked
+    cursor_overlay: overlayToggle.checked,
+    confirm_actions: confirmToggle.checked
   };
 }
 
@@ -132,7 +141,7 @@ clearKeyBtn.addEventListener('click', async () => {
 document.getElementById('save').addEventListener('click', async () => {
   errorBox.classList.add('hidden');
   const cfg = collect();
-  const newKey = newKeyInput.value.trim();
+  const newKey = providerSel.value === 'codex' ? '' : newKeyInput.value.trim();
   const summary = await window.pcu.getConfigSummary();
   if (newKey && summary.keyEncryptionAvailable === false) {
     errorBox.textContent = 'The key store is not connected right now, so the key was not saved. ' +
@@ -160,3 +169,30 @@ document.getElementById('save').addEventListener('click', async () => {
 });
 
 window.pcu.getConfigSummary().then(fill);
+
+async function checkCodexSignIn(login = false) {
+  const status = document.getElementById('codex-status');
+  const button = document.getElementById('codex-login');
+  button.disabled = true;
+  status.textContent = login ? 'Complete sign-in in your browser…' : 'Checking sign-in…';
+  try {
+    const result = await (login ? window.pcu.codexLogin() : window.pcu.codexStatus());
+    renderCodexState(result);
+  } catch (error) { status.textContent = error.message; }
+  finally { if (!codexAuthPending) button.disabled = false; }
+}
+let codexAuthPending = false;
+function renderCodexState(result) {
+  codexAuthPending = result.pending === true;
+  document.getElementById('codex-status').textContent = result.signedIn
+    ? `Signed in. You're ready to go! Press ${hotkeyInput.value || 'Control+Alt+K'} to start a task.`
+    : result.message;
+  document.getElementById('codex-login').disabled = codexAuthPending;
+  document.getElementById('codex-login').textContent = codexAuthPending ? 'Waiting for sign-in…'
+    : result.signedIn ? 'Use another ChatGPT account' : 'Try again';
+  document.getElementById('codex-refresh').disabled = codexAuthPending;
+}
+window.pcu.onCodexAuthState(renderCodexState);
+document.getElementById('codex-login').addEventListener('click', () => checkCodexSignIn(true));
+document.getElementById('codex-refresh').addEventListener('click', () => checkCodexSignIn());
+checkCodexSignIn();

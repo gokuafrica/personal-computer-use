@@ -192,8 +192,7 @@ class TaskRunner:
         if approved:
             await self._log(f"Approved by user: {detail}")
             return True
-        await self._log(f"Refused by user, skipping: {detail}")
-        return False
+        raise RuntimeError("Action declined by user; task stopped.")
 
     def _glide_target(self) -> tuple[int, int] | None:
         """Focused control's center for pointer-glide-before-type/key."""
@@ -222,6 +221,7 @@ class TaskRunner:
             px = origin_x + round(float(x) * scale_x)
             py = origin_y + round(float(y) * scale_y)
             await asyncio.to_thread(control.move, px, py, self.pointer_glide_s)
+            self._check_stop()
             if kind == "click":
                 await asyncio.to_thread(control.left_click)
             elif kind == "double_click":
@@ -234,6 +234,7 @@ class TaskRunner:
             if px is None or py is None:
                 raise ValueError("click_element missing resolved coordinates")
             await asyncio.to_thread(control.move, px, py, self.pointer_glide_s)
+            self._check_stop()
             await asyncio.to_thread(control.left_click)
         elif kind == "scroll":
             amount = int(action.get("amount") or 1)
@@ -245,11 +246,13 @@ class TaskRunner:
             target = await asyncio.to_thread(self._glide_target)
             if target is not None:
                 await asyncio.to_thread(control.move, target[0], target[1], self.pointer_glide_s)
-            await asyncio.to_thread(control.type_text, str(action.get("text", "")))
+            self._check_stop()
+            await asyncio.to_thread(control.type_text, str(action.get("text", "")), self.stop_event.is_set)
         elif kind == "key":
             target = await asyncio.to_thread(self._glide_target)
             if target is not None:
                 await asyncio.to_thread(control.move, target[0], target[1], self.pointer_glide_s)
+            self._check_stop()
             await asyncio.to_thread(control.press_key, str(action.get("key", "")))
         elif kind == "wait":
             amount = min(MAX_WAIT_S, max(0.0, float(action.get("amount") or 1)))
@@ -361,7 +364,8 @@ class TaskRunner:
             return None
 
     async def run(self) -> None:
-        cursor.hide_native_cursor()
+        if self.cfg.get("cursor_overlay", True):
+            cursor.hide_native_cursor()
         try:
             await self._run()
         except _TaskStopped:
@@ -389,6 +393,7 @@ class TaskRunner:
         for step in range(1, self.max_steps + 1):
             self._check_stop()
             unverified_type = False
+            defer_completion = False
             await self._status("running", "Working on it", step)
             img = await asyncio.to_thread(screen.capture)
             model_img, scale_x, scale_y = screen.to_model_image(img)
@@ -449,7 +454,7 @@ class TaskRunner:
                             "holding completion for one more step: last typed "
                             "text was not verified"
                         )
-                        result_done = False
+                        defer_completion = True
                         break
                     await self._status(
                         "idle", action.get("summary") or result.summary or "Task completed."
@@ -472,10 +477,11 @@ class TaskRunner:
                         )
                         continue
                     name = str(element.get("name") or "")
+                    detail = f"Click {name or 'unnamed control'} (element {action.get('id')})"
                     # Clicks are gated by the control's LABEL with the
                     # click-specific vocabulary; the field's VALUE is content
                     # (e.g. text in an edit box) and clicking it is benign.
-                    if safety.check_click_element(name) == "confirm":
+                    if self.cfg.get("confirm_actions") is True and safety.check_click_element(name) == "confirm":
                         if not await self._gate(detail):
                             continue
                     center = element.get("center")
@@ -487,7 +493,7 @@ class TaskRunner:
                     action = dict(action, px=center[0], py=center[1])
                 else:
                     gate_detail = str(action.get("text") or action.get("key") or detail)
-                    if safety.check(kind, gate_detail) == "confirm":
+                    if self.cfg.get("confirm_actions") is True and safety.check(kind, gate_detail) == "confirm":
                         if not await self._gate(detail):
                             continue
                 # Structured physical coords let the Electron overlay place
@@ -516,7 +522,7 @@ class TaskRunner:
                         unverified_type = True
                 if self.action_delay_s > 0:
                     await self._sleep_checked(self.action_delay_s)
-            result_done = result.done
+            result_done = result.done and not defer_completion
             if result.done and unverified_type and not self._completion_held:
                 self._completion_held = True
                 await self._log(

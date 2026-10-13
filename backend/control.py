@@ -8,6 +8,10 @@ mouse is moved to a screen corner, which the agent loop treats as an abort.
 from __future__ import annotations
 
 import math
+import ctypes
+from ctypes import wintypes
+import time
+from typing import Callable
 
 import pyautogui
 
@@ -17,6 +21,52 @@ pyautogui.FAILSAFE = True
 FailSafeException = pyautogui.FailSafeException
 
 WHEEL_DELTA = 120
+
+
+class _MouseInput(ctypes.Structure):
+    _fields_ = [("dx", wintypes.LONG), ("dy", wintypes.LONG),
+                ("mouseData", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
+
+
+class _KeyboardInput(ctypes.Structure):
+    _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
+                ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
+                ("dwExtraInfo", ctypes.c_size_t)]
+
+
+class _InputUnion(ctypes.Union):
+    _fields_ = [("mi", _MouseInput), ("ki", _KeyboardInput)]
+
+
+class _Input(ctypes.Structure):
+    _anonymous_ = ("data",)
+    _fields_ = [("type", wintypes.DWORD), ("data", _InputUnion)]
+
+
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
+_user32.SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(_Input), ctypes.c_int)
+_user32.SendInput.restype = wintypes.UINT
+
+
+def _inject_pair(down: _Input, up: _Input) -> None:
+    """Checked Windows input: never report a silently discarded click as success."""
+    pyautogui.failSafeCheck()
+    events = (_Input * 2)(down, up)
+    count = _user32.SendInput(2, events, ctypes.sizeof(_Input))
+    if count != 2:
+        if count == 1:
+            # Release a partially injected press before stopping the task.
+            _user32.SendInput(1, ctypes.byref(up), ctypes.sizeof(_Input))
+        raise RuntimeError(
+            "Windows blocked mouse or keyboard input. Stop and check whether "
+            "the target app is running as administrator or the desktop is locked."
+        )
+
+
+def _click(down_flag: int, up_flag: int) -> None:
+    _inject_pair(_Input(type=0, mi=_MouseInput(dwFlags=down_flag)),
+                 _Input(type=0, mi=_MouseInput(dwFlags=up_flag)))
 
 _KEY_ALIASES = {
     "win": "winleft",
@@ -58,15 +108,17 @@ def move(x: int, y: int, duration: float = 0.0) -> None:
 
 
 def left_click() -> None:
-    pyautogui.click()
+    _click(0x0002, 0x0004)
 
 
 def double_click() -> None:
-    pyautogui.doubleClick()
+    left_click()
+    time.sleep(0.08)
+    left_click()
 
 
 def right_click() -> None:
-    pyautogui.rightClick()
+    _click(0x0008, 0x0010)
 
 
 def scroll(amount: int, direction: str = "down") -> None:
@@ -85,10 +137,22 @@ def scroll(amount: int, direction: str = "down") -> None:
         raise ValueError(f"unknown scroll direction: {direction!r}")
 
 
-def type_text(text: str) -> None:
-    # pyautogui.write only types characters representable on the current
-    # keyboard layout; non-ASCII text is typed best-effort for the MVP.
-    pyautogui.write(text, interval=0.01)
+def type_text(text: str, stopped: Callable[[], bool] = lambda: False) -> None:
+    """Type Unicode without a clipboard; stop between characters on cancellation."""
+    for character in text.replace("\r\n", "\n").replace("\r", "\n"):
+        if stopped():
+            return
+        if character in ("\n", "\t"):
+            vk = 0x0D if character == "\n" else 0x09
+            _inject_pair(_Input(type=1, ki=_KeyboardInput(wVk=vk)),
+                         _Input(type=1, ki=_KeyboardInput(wVk=vk, dwFlags=2)))
+        else:
+            encoded = character.encode("utf-16-le")
+            for offset in range(0, len(encoded), 2):
+                unit = int.from_bytes(encoded[offset:offset + 2], "little")
+                _inject_pair(_Input(type=1, ki=_KeyboardInput(wScan=unit, dwFlags=4)),
+                             _Input(type=1, ki=_KeyboardInput(wScan=unit, dwFlags=6)))
+        time.sleep(0.01)
 
 
 def press_key(combo: str) -> None:

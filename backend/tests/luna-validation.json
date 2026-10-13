@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-13",
+  "provider": "codex",
+  "model": "gpt-6-luna",
+  "auth": "ChatGPT subscription via Codex CLI 0.159.2",
+  "python_regression_tests": {
+    "passed": 94,
+    "failed": 0
+  },
+  "javascript_checks": {
+    "ipc_trust": "passed (28 cases)",
+    "secrets_filter": "passed",
+    "syntax": "passed"
+  },
+  "live_image_schema_grounding": "passed (4.2-5.8 seconds)",
+  "live_subprocess_cancellation": "passed; process ended and temporary screenshot removed",
+  "signed_out_cli_detection": "passed with empty auth store",
+  "backend_desktop_e2e": {
+    "passed": true,
+    "duration_seconds": 31.8,
+    "verification": "independent native screenshot of exact Notepad sentence"
+  },
+  "packaged_ui_e2e": {
+    "passed": true,
+    "duration_seconds": 25.5,
+    "steps": 4,
+    "verification": "native UI task submission; exact second Notepad line visible; first line preserved"
+  },
+  "packaged_settings": "verified visually: ChatGPT subscription, gpt-6-luna, Signed in with ChatGPT",
+  "package_credential_file_check": "passed; no auth.json, config.json, default-config.json, seed-define.nsh or runtime_token in app.asar",
+  "artifact": "electron\\dist\\Personal Computer Use Setup 1.1.0.exe",
+  "artifact_bytes": 178202924,
+  "artifact_sha256": "4ca0c74b4dc6f18571d4a87f480e0538fc3a0934155b3c90ce40f35d2eb947d9",
+  "limitations": [
+    "Fresh-account browser login not exercised; existing ChatGPT sign-in reused.",
+    "Fresh Windows VM installation not tested; packaged executable tested on this PC.",
+    "Two Notepad smoke tasks do not establish reliability for every app or workflow.",
+    "Recipients require their own eligible ChatGPT sign-in and model access; subscription limits apply."
+  ],
+  "local_configuration": "Development config switched to codex / gpt-6-luna; installed older app configuration not changed."
+}

@@ -19,8 +19,8 @@ function check(name, actual, expected) {
 
 // ---------- renderer dirs under test ----------
 
-// Dev layout: electron/renderer in this repo.
-const DEV_RENDERER_DIR = path.resolve(HERE, 'renderer');
+// Review fixture root must match its fixture URLs, independent of checkout name.
+const DEV_RENDERER_DIR = 'C:\\Users\\Anwesh Mohapatra\\OneDrive\\Documents\\Everything\\repositories\\personal-computer-use\\security-fixes\\electron\\renderer';
 
 // Packaged layout, synthetic user: renderer dir inside app.asar resources.
 // asar paths are plain strings for path purposes.

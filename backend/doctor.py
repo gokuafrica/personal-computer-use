@@ -215,6 +215,12 @@ def check_config(doc: Doctor) -> dict[str, object] | None:
         doc.warn("key storage", "no key stored yet")
 
     provider = str(cfg.get("provider", "")).strip()
+    if provider == "codex":
+        from backend.providers.codex_provider import login_status
+        status = login_status()
+        (doc.ok if status["signedIn"] else doc.fail)("ChatGPT subscription", status["message"])
+        doc.ok("provider", "codex (no API key required)")
+        return cfg
     if provider in ("openai", "anthropic", "openai_compat"):
         doc.ok("provider", provider)
     else:
@@ -258,6 +264,9 @@ def check_provider_live(doc: Doctor, cfg: dict[str, object] | None) -> None:
         doc.warn("provider connectivity", "skipped (config unavailable)")
         return
     provider = str(cfg.get("provider", ""))
+    if provider == "codex":
+        doc.warn("provider connectivity", "Use backend/tests/test_codex_live.py for the opt-in Luna image test.")
+        return
     if provider not in ("openai", "anthropic", "openai_compat"):
         doc.warn("provider connectivity", "skipped (unknown provider)")
         return

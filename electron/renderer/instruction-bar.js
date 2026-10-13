@@ -26,8 +26,15 @@ input.addEventListener('keydown', (e) => {
       hint.textContent = 'Backend not ready \u2014 try again in a moment';
       return;
     }
-    input.value = '';
-    window.pcu.submitInstruction(text).then(() => window.pcu.hideBar());
+    setRunning(true);
+    window.pcu.submitInstruction(text).then((result) => {
+      if (!result?.ok) throw new Error('Backend not ready');
+      input.value = '';
+      window.pcu.hideBar();
+    }).catch(() => {
+      setRunning(false);
+      hint.textContent = 'Could not start task — your instruction is kept. Try again.';
+    });
   }
 });
 
